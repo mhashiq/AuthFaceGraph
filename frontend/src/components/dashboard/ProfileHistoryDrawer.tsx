@@ -96,9 +96,15 @@ export const ProfileHistoryDrawer: React.FC<ProfileHistoryDrawerProps> = ({ isOp
   if (!isOpen) return null;
 
   // Format date utility
+  // Helper to normalize SQLite timestamp strings for consistent JS parsing
+  const normalise = (ts: string) => {
+    const clean = ts.replace(' ', 'T');
+    return /Z$|[+-]\d{2}:\d{2}$/.test(clean) ? clean : clean + 'Z';
+  };
+
   const formatDate = (dateStr: string) => {
     try {
-      const d = new Date(dateStr);
+      const d = new Date(normalise(dateStr));
       return d.toLocaleString(undefined, {
         dateStyle: 'medium',
         timeStyle: 'short',
@@ -112,10 +118,6 @@ export const ProfileHistoryDrawer: React.FC<ProfileHistoryDrawerProps> = ({ isOp
   const getDurationStr = (session: SessionRecord) => {
     if (!session.ended_at) return 'Active';
     try {
-      // Normalise timestamps: if no timezone offset present, treat as UTC by appending 'Z'
-      const normalise = (ts: string) =>
-        /Z$|[+-]\d{2}:\d{2}$/.test(ts) ? ts : ts + 'Z';
-
       const start = new Date(normalise(session.started_at)).getTime();
       const end   = new Date(normalise(session.ended_at)).getTime();
       const totalSec = Math.floor((end - start) / 1000);

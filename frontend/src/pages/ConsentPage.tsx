@@ -243,6 +243,17 @@ export const ConsentPage: React.FC = () => {
           </div>
         )}
       </div>
+      <footer className="absolute bottom-6 left-0 right-0 text-center text-[10px] font-mono text-dark-500 flex items-center justify-center gap-1.5">
+        <span className="text-white font-semibold">© 2026</span>
+        <span>Developed and Researched by</span>
+        <a href="https://www.authbrain.io" target="_blank" rel="noopener noreferrer" className="text-white font-bold hover:underline">
+          AuthBrain
+        </a>
+        <span>·</span>
+        <a href="https://www.authbrain.io" target="_blank" rel="noopener noreferrer" className="text-dark-400 hover:text-white transition-colors hover:underline">
+          www.authbrain.io
+        </a>
+      </footer>
     </div>
   );
 };

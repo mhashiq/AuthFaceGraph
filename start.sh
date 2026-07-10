@@ -1,4 +1,6 @@
 #!/bin/bash
+#cd /Users/mdmehedihassan/Desktop/Projects/AuthBrain_AI_Face_Analysis
+#./start.sh
 
 # ─────────────────────────────────────────────
 #  AuthBrain AI Face Analysis — Start Script
