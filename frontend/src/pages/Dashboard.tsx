@@ -185,15 +185,15 @@ export const Dashboard: React.FC = () => {
       <footer className="px-6 py-4 border-t border-dark-800/40 flex flex-col sm:flex-row items-center justify-between text-xs font-mono text-dark-500 gap-2">
         <div className="flex items-center gap-1.5">
           <span>© {new Date().getFullYear()}</span>
-          <span className="text-white font-medium">Developed and Researched by AuthFaceGraph</span>
+          <span className="text-white font-medium">Developed and Researched by AuthBrain</span>
           <span>·</span>
           <a 
-            href="https://www.authfacegraph.io" 
+            href="https://www.authbrain.io" 
             target="_blank" 
             rel="noopener noreferrer" 
             className="text-violet-400 hover:text-violet-300 hover:underline transition-colors font-semibold"
           >
-            www.authfacegraph.io
+            www.authbrain.io
           </a>
         </div>
         <span>Consent-based · GDPR Compliant · No Biometric Data Stored</span>
