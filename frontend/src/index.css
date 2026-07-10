@@ -1,0 +1,104 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── CSS Custom Properties ────────────────────────────────────────────────── */
+:root {
+  --brand-green: #00ff41;
+  --dark-950: #020408;
+  --dark-900: #050a0e;
+  --scrollbar-thumb: #1e2d40;
+  --scrollbar-track: #080f14;
+}
+
+/* ── Base Reset ───────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  background-color: var(--dark-950);
+  color: #f9fafb;
+  font-family: 'Inter', system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+/* ── Custom Scrollbar ────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #263550;
+}
+
+/* ── Grid background pattern ─────────────────────────────────────────────── */
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(0,255,65,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,255,65,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ── Glassmorphism card ──────────────────────────────────────────────────── */
+.glass-card {
+  background: rgba(13, 21, 32, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(38, 53, 80, 0.5);
+}
+
+/* ── Brand glow effects ──────────────────────────────────────────────────── */
+.glow-brand {
+  box-shadow: 0 0 20px rgba(0, 255, 65, 0.3), 0 0 40px rgba(0, 255, 65, 0.15);
+}
+.text-glow-brand {
+  text-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
+}
+
+/* ── Metric value animation ─────────────────────────────────────────────── */
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.metric-value-update {
+  animation: countUp 0.15s ease-out;
+}
+
+/* ── Recharts overrides for dark theme ───────────────────────────────────── */
+.recharts-cartesian-axis-tick-value {
+  fill: #6b7280 !important;
+  font-family: 'JetBrains Mono', monospace !important;
+}
+.recharts-legend-item-text {
+  color: #9ca3af !important;
+}
+.recharts-tooltip-wrapper {
+  z-index: 50;
+}
+
+/* ── Input focus ring ────────────────────────────────────────────────────── */
+input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0, 255, 65, 0.25);
+}
+
+/* ── Transition utilities ────────────────────────────────────────────────── */
+.transition-brand {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}

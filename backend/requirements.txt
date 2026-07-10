@@ -1,0 +1,62 @@
+# ============================================================
+# AuthBrain AI Face Analysis Engine — Backend Dependencies
+# ============================================================
+# Install: pip install -r requirements.txt
+# For GPU acceleration: pip install onnxruntime-gpu instead of onnxruntime
+
+# --- Web Framework ---
+fastapi==0.111.0
+uvicorn[standard]==0.29.0          # ASGI server with websocket support
+websockets==12.0                   # WebSocket protocol
+python-multipart==0.0.9            # Multipart form support
+
+# --- Computer Vision Core ---
+opencv-python-headless==4.9.0.80   # Headless (no GUI) for server use
+mediapipe==0.10.14                 # Face landmark detection (478 points)
+
+# --- Scientific Computing ---
+numpy==1.26.4
+scipy==1.13.0                      # Euclidean distance, spatial utilities
+
+# --- Deep Learning (ONNX Runtime for model inference) ---
+onnxruntime==1.18.0                # CPU inference (swap for onnxruntime-gpu)
+torch==2.3.0                       # Required for GNN/PyTorch-based models
+torchvision==0.18.0
+timm>=0.9.16                       # EfficientFace backbone
+huggingface_hub>=0.22.2            # Downloading EfficientFace weights
+hsemotion-onnx>=0.1.4              # HSEmotion classifier
+torch-geometric>=2.5.3             # Graph Neural Networks
+
+# --- Database ---
+sqlalchemy[asyncio]==2.0.30        # Async ORM
+asyncpg==0.29.0                    # Async PostgreSQL driver
+alembic==1.13.1                    # Database migrations
+psycopg2-binary==2.9.9             # Sync psycopg2 for alembic
+aiosqlite==0.20.0                  # Async SQLite for testing
+
+# --- Data Validation & Settings ---
+pydantic==2.7.1                    # Data validation
+pydantic-settings==2.3.0           # .env config management
+
+# --- Security & JWT ---
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# --- Logging ---
+structlog==24.2.0                  # Structured JSON logging
+
+# --- HTTP Client ---
+httpx==0.27.0                      # Async HTTP client
+
+# --- Testing ---
+pytest==8.2.0
+pytest-asyncio==0.23.7
+pytest-benchmark==4.0.0
+httpx==0.27.0                      # Used for FastAPI TestClient
+anyio==4.4.0
+
+# --- Code Quality ---
+black==24.4.2
+isort==5.13.2
+mypy==1.10.0
+ruff==0.4.6
