@@ -16,6 +16,8 @@ from app.dl.emotion.ensemble import EmotionEnsemble, EMOTION_LABELS
 from app.dl.action_units.au_estimator import GeometricAUEstimator
 from app.dl.graph.constructor import GraphConstructor
 from app.dl.base import EmotionPrediction
+from app.dl.base import GNNPrediction
+from app.dl.base import ActionUnitResult
 
 
 def test_registry_registration() -> None:
@@ -55,6 +57,104 @@ def test_ensemble_logic() -> None:
     assert res["final_emotion"] == "happy"
     assert res["confidence"] > 0.6
     assert res["disagreement_score"] < 0.2  # Consensus should yield low entropy
+
+
+def test_ensemble_smile_bias_prefers_happy() -> None:
+    """Strong smile geometry should correct a low-confidence sad prediction."""
+    ensemble = EmotionEnsemble()
+
+    sad_pred = EmotionPrediction(
+        emotion="sad",
+        confidence=0.34,
+        probabilities={
+            "neutral": 0.22,
+            "happy": 0.18,
+            "sad": 0.34,
+            "surprise": 0.06,
+            "fear": 0.05,
+            "disgust": 0.05,
+            "anger": 0.04,
+            "contempt": 0.06,
+        },
+        model_id="hsemotion",
+    )
+
+    res = ensemble.combine([sad_pred], smile_intensity=0.85)
+
+    assert res["final_emotion"] == "happy"
+    assert res["probabilities"]["happy"] > res["probabilities"]["sad"]
+
+
+def test_ensemble_uses_gnn_signal_when_available() -> None:
+    """The GNN should participate in the final consensus when enabled."""
+    ensemble = EmotionEnsemble()
+
+    image_pred = EmotionPrediction(
+        emotion="sad",
+        confidence=0.62,
+        probabilities={
+            "neutral": 0.12,
+            "happy": 0.10,
+            "sad": 0.62,
+            "surprise": 0.04,
+            "fear": 0.03,
+            "disgust": 0.03,
+            "anger": 0.03,
+            "contempt": 0.03,
+        },
+        model_id="hsemotion",
+    )
+
+    gnn_pred = GNNPrediction(
+        emotion="happy",
+        confidence=0.91,
+        probabilities={
+            "neutral": 0.03,
+            "happy": 0.91,
+            "sad": 0.01,
+            "surprise": 0.01,
+            "fear": 0.01,
+            "disgust": 0.01,
+            "anger": 0.01,
+            "contempt": 0.01,
+        },
+        model_id="gnn_gat",
+    )
+
+    res = ensemble.combine([image_pred, gnn_pred])
+
+    assert res["final_emotion"] == "happy"
+    assert res["probabilities"]["happy"] > res["probabilities"]["sad"]
+
+
+def test_engine_smile_signal_uses_au12() -> None:
+    """AU12 intensity should strengthen the smile signal when geometry is weak."""
+    from app.dl.engine import DLEngine
+
+    engine = DLEngine(session_id="test_session")
+
+    landmarks = [Landmark(x=0.5, y=0.5, z=0.0) for _ in range(478)]
+    au_results = [
+        ActionUnitResult(au_id="AU12", name="Lip Corner Puller (Smile)", present=True, intensity=4.0),
+    ]
+
+    smile = engine._estimate_smile_intensity(landmarks, au_results)
+
+    assert smile == 0.8
+
+
+def test_face_detector_detects_upside_down_landmarks() -> None:
+    """Upside-down landmark order should be recognized before crop generation."""
+    from app.analysis.face_detector import FaceDetector
+
+    landmarks = [Landmark(x=0.5, y=0.5, z=0.0) for _ in range(478)]
+
+    for idx in (33, 133, 362, 263):
+        landmarks[idx] = Landmark(x=0.5, y=0.75, z=0.0)
+    for idx in (61, 291, 13, 14):
+        landmarks[idx] = Landmark(x=0.5, y=0.25, z=0.0)
+
+    assert FaceDetector._looks_upside_down(landmarks) is True
 
 
 def test_geometric_au_estimation() -> None:
@@ -161,9 +261,9 @@ def test_pipeline_integration(monkeypatch) -> None:
     assert result.deep_learning is not None
     assert result.deep_learning.dl_enabled is True
     assert result.deep_learning.emotion_ensemble is not None
-    assert result.deep_learning.gnn_prediction is not None
+    assert result.deep_learning.gnn_prediction is None
     assert len(result.deep_learning.action_units) > 0
-    assert len(result.deep_learning.top_important_landmarks) == 20
-    assert len(result.deep_learning.xai_explanations) > 0
+    assert len(result.deep_learning.top_important_landmarks) == 0
+    assert len(result.deep_learning.xai_explanations) == 0
     assert len(result.deep_learning.landmarks) == 478
 

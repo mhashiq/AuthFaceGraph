@@ -24,11 +24,14 @@ import numpy as np
 class EmotionPrediction:
     """Output from a single emotion recognition model."""
     emotion: str                          # top-1 emotion label
-    confidence: float                     # top-1 confidence [0, 1]
-    probabilities: dict[str, float]       # all class probabilities
-    model_id: str
+    confidence: float                     # top-1 calibrated confidence [0, 1]
+    probabilities: dict[str, float]       # all calibrated class probabilities
+    raw_confidence: float = 0.0           # raw top-1 confidence [0, 1]
+    raw_probabilities: dict[str, float] = field(default_factory=dict)
+    model_id: str = ""
     latency_ms: float = 0.0
     error: str | None = None              # set if inference failed
+    status: str = "healthy"               # "healthy" | "error" | "disabled"
 
 
 @dataclass
@@ -37,10 +40,15 @@ class GNNPrediction:
     emotion: str
     confidence: float
     probabilities: dict[str, float]
-    node_importance: list[float]          # [478] per-landmark importance
-    edge_attention: list[float]           # per-edge attention weights
-    model_id: str
+    raw_confidence: float = 0.0
+    raw_probabilities: dict[str, float] = field(default_factory=dict)
+    node_importance: list[float] = field(default_factory=list)          # [478] per-landmark importance
+    edge_attention: list[float] = field(default_factory=list)           # per-edge attention weights
+    edge_index: list[list[int]] = field(default_factory=list)           # actual edge index [2, num_edges]
+    model_id: str = ""
     latency_ms: float = 0.0
+    error: str | None = None
+    status: str = "healthy"
 
 
 @dataclass
@@ -198,6 +206,8 @@ class GNNModelBase(ABC, LatencyMixin):
     def __init__(self) -> None:
         LatencyMixin.__init__(self)
         self._loaded = False
+        self._inference_count = 0
+        self._error_count = 0
 
     @property
     @abstractmethod
@@ -219,13 +229,34 @@ class GNNModelBase(ABC, LatencyMixin):
         if not self._loaded:
             return GNNPrediction(
                 emotion="unknown", confidence=0.0, probabilities={},
-                node_importance=[], edge_attention=[], model_id=self.model_id,
+                node_importance=[], edge_attention=[], edge_index=[],
+                model_id=self.model_id, error="Model not loaded", status="disabled",
             )
         t = time.perf_counter()
-        result = self._forward_impl(graph)
+        try:
+            result = self._forward_impl(graph)
+            self._inference_count += 1
+        except Exception as exc:
+            self._error_count += 1
+            result = GNNPrediction(
+                emotion="unknown", confidence=0.0, probabilities={},
+                node_importance=[], edge_attention=[], edge_index=[],
+                model_id=self.model_id, error=str(exc), status="error",
+            )
         result.latency_ms = (time.perf_counter() - t) * 1000
         self._record_latency(result.latency_ms)
         return result
+
+    def health(self) -> dict[str, Any]:
+        return {
+            "model_id": self.model_id,
+            "loaded": self._loaded,
+            "avg_latency_ms": round(self.avg_latency_ms, 2),
+            "p95_latency_ms": round(self.p95_latency_ms, 2),
+            "inference_count": self._inference_count,
+            "error_count": self._error_count,
+            "error_rate": round(self._error_count / max(self._inference_count, 1), 4),
+        }
 
 
 class TemporalModelBase(ABC, LatencyMixin):

@@ -9,7 +9,7 @@ These schemas are used for both REST and WebSocket communication.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -173,6 +173,7 @@ class EmotionLabel(str, Enum):
     DISGUST = "disgust"
     ANGER = "anger"
     CONTEMPT = "contempt"
+    UNKNOWN = "unknown"
 
 
 class DLEmotionPrediction(BaseModel):
@@ -182,8 +183,12 @@ class DLEmotionPrediction(BaseModel):
     emotion: EmotionLabel
     confidence: float
     probabilities: dict[str, float]
+    raw_confidence: float = 0.0
+    calibrated_confidence: float = 0.0
     model_id: str
     latency_ms: float = 0.0
+    error: str | None = None
+    status: str = "healthy"
 
 
 class ActionUnit(BaseModel):
@@ -201,9 +206,15 @@ class GNNPrediction(BaseModel):
     emotion: EmotionLabel
     confidence: float
     probabilities: dict[str, float]
+    raw_confidence: float = 0.0
+    calibrated_confidence: float = 0.0
     model_id: str
     node_importance: list[float] = Field(default_factory=list)
     edge_attention: list[float] = Field(default_factory=list)
+    edge_index: list[list[int]] = Field(default_factory=list)
+    latency_ms: float = 0.0
+    error: str | None = None
+    status: str = "healthy"
 
 
 class EnsembleResult(BaseModel):
@@ -216,6 +227,9 @@ class EnsembleResult(BaseModel):
     model_predictions: list[DLEmotionPrediction] = Field(default_factory=list)
     disagreement_score: float = 0.0
     uncertainty: float = 0.0
+    agreement_score: float = 0.0
+    raw_confidence: float = 0.0
+    calibrated_confidence: float = 0.0
 
 
 class DLAnalysisResult(BaseModel):
@@ -231,6 +245,7 @@ class DLAnalysisResult(BaseModel):
     models_used: list[str] = Field(default_factory=list)
     xai_explanations: list[ExplanationResult] = Field(default_factory=list)
     landmarks: list[Landmark] = Field(default_factory=list)
+    model_health: dict[str, Any] = Field(default_factory=dict)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -247,7 +262,7 @@ class FaceAnalysisResult(BaseModel):
     # Metadata
     frame_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     session_id: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     inference_time_ms: float
 
     # Detection
@@ -256,6 +271,7 @@ class FaceAnalysisResult(BaseModel):
     active_face_index: int = 0
     bounding_box: FaceBoundingBox | None = None
     landmark_count: int = 0
+    landmarks: list[Landmark] = Field(default_factory=list)
 
     # Analysis results (None if no face detected)
     head_pose: HeadPoseResult | None = None
@@ -290,7 +306,7 @@ class WSMessage(BaseModel):
     """Wrapper for all WebSocket JSON messages."""
     type: WSMessageType
     payload: dict[str, Any]
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class WSErrorMessage(BaseModel):

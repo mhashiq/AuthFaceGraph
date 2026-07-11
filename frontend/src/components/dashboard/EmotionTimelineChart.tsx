@@ -15,6 +15,9 @@ export interface EmotionTimelineDataPoint {
   neutral: number;
   surprise: number;
   anger: number;
+  fear: number;
+  disgust: number;
+  contempt: number;
 }
 
 interface EmotionTimelineChartProps {
@@ -41,16 +44,36 @@ export const EmotionTimelineChart: React.FC<EmotionTimelineChartProps> = ({ data
             >
               <defs>
                 <linearGradient id="colorHappy" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
                   <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
                 </linearGradient>
                 <linearGradient id="colorNeutral" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
                   <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
                 </linearGradient>
                 <linearGradient id="colorSad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25} />
                   <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.0} />
+                </linearGradient>
+                <linearGradient id="colorSurprise" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.25} />
+                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.0} />
+                </linearGradient>
+                <linearGradient id="colorAnger" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.25} />
+                  <stop offset="95%" stopColor="#f43f5e" stopOpacity={0.0} />
+                </linearGradient>
+                <linearGradient id="colorFear" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#a855f7" stopOpacity={0.25} />
+                  <stop offset="95%" stopColor="#a855f7" stopOpacity={0.0} />
+                </linearGradient>
+                <linearGradient id="colorDisgust" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#ea580c" stopOpacity={0.25} />
+                  <stop offset="95%" stopColor="#ea580c" stopOpacity={0.0} />
+                </linearGradient>
+                <linearGradient id="colorContempt" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#ec4899" stopOpacity={0.25} />
+                  <stop offset="95%" stopColor="#ec4899" stopOpacity={0.0} />
                 </linearGradient>
               </defs>
               <XAxis
@@ -79,6 +102,7 @@ export const EmotionTimelineChart: React.FC<EmotionTimelineChartProps> = ({ data
                 fillOpacity={1}
                 fill="url(#colorNeutral)"
                 name="Neutral"
+                stackId="1"
               />
               <Area
                 type="monotone"
@@ -87,6 +111,7 @@ export const EmotionTimelineChart: React.FC<EmotionTimelineChartProps> = ({ data
                 fillOpacity={1}
                 fill="url(#colorHappy)"
                 name="Happy"
+                stackId="1"
               />
               <Area
                 type="monotone"
@@ -95,6 +120,52 @@ export const EmotionTimelineChart: React.FC<EmotionTimelineChartProps> = ({ data
                 fillOpacity={1}
                 fill="url(#colorSad)"
                 name="Sad"
+                stackId="1"
+              />
+              <Area
+                type="monotone"
+                dataKey="surprise"
+                stroke="#f59e0b"
+                fillOpacity={1}
+                fill="url(#colorSurprise)"
+                name="Surprise"
+                stackId="1"
+              />
+              <Area
+                type="monotone"
+                dataKey="anger"
+                stroke="#f43f5e"
+                fillOpacity={1}
+                fill="url(#colorAnger)"
+                name="Anger"
+                stackId="1"
+              />
+              <Area
+                type="monotone"
+                dataKey="fear"
+                stroke="#a855f7"
+                fillOpacity={1}
+                fill="url(#colorFear)"
+                name="Fear"
+                stackId="1"
+              />
+              <Area
+                type="monotone"
+                dataKey="disgust"
+                stroke="#ea580c"
+                fillOpacity={1}
+                fill="url(#colorDisgust)"
+                name="Disgust"
+                stackId="1"
+              />
+              <Area
+                type="monotone"
+                dataKey="contempt"
+                stroke="#ec4899"
+                fillOpacity={1}
+                fill="url(#colorContempt)"
+                name="Contempt"
+                stackId="1"
               />
             </AreaChart>
           </ResponsiveContainer>

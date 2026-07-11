@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np
@@ -179,6 +179,7 @@ class FaceAnalysisPipeline:
             head_pitch=head_pose.pitch,
             yawn_detected=mouth.yawn_detected,
             blinks_per_minute=eyes.blinks_per_minute,
+            eye_closure_duration_ms=eyes.eye_closure_duration_ms,
         )
 
         # ── 5. Expert system ───────────────────────────────────────────────────
@@ -220,7 +221,8 @@ class FaceAnalysisPipeline:
                         frame_bgr=frame_bgr,
                         frame_width=w,
                         frame_height=h,
-                        timestamp_ms=elapsed_ms
+                        timestamp_ms=elapsed_ms,
+                        quality_score=quality.overall_score,
                     )
                     if dl_res_dict:
                         from app.models.schemas import DLAnalysisResult
@@ -273,13 +275,14 @@ class FaceAnalysisPipeline:
         result = FaceAnalysisResult(
             frame_id=str(uuid.uuid4()),
             session_id=self.session_id,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             inference_time_ms=round(t_total, 2),
             face_detected=True,
             face_count=face_count,
             active_face_index=active_idx,
             bounding_box=face.bounding_box,
             landmark_count=len(face.landmarks),
+            landmarks=face.landmarks,
             head_pose=head_pose,
             eyes=eyes,
             mouth=mouth,
@@ -304,7 +307,7 @@ class FaceAnalysisPipeline:
         return FaceAnalysisResult(
             frame_id=str(uuid.uuid4()),
             session_id=self.session_id,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             inference_time_ms=0.0,
             face_detected=False,
             face_count=0,

@@ -78,20 +78,12 @@ class EfficientFaceModel(EmotionModelBase):
         cache_dir = Path(settings.DL_MODEL_CACHE_DIR) / "efficientface"
         cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # ── Strategy 1: Try HuggingFace Hub ──────────────────────────────────
+        # ── Strategy 1: Try HuggingFace Hub (Online / Offline cache) ──────────────────
         if self._try_load_hf(cache_dir):
             return
 
-        # ── Strategy 2: timm EfficientNet-B0 + random emotion head ──────────
-        if self._try_load_timm(cache_dir):
-            return
-
-        # ── Strategy 3: Lightweight fallback ─────────────────────────────────
-        self._mode = "fallback"
-        logger.warning(
-            "efficientface_fallback",
-            hint="Install torch + timm: pip install torch torchvision timm huggingface_hub",
-        )
+        # Disable all un-finetuned / ImageNet / heuristic fallbacks
+        raise RuntimeError("Failed to load fine-tuned EfficientFace model checkpoint. Dummy fallbacks are disabled.")
 
     def _try_load_hf(self, cache_dir: Path) -> bool:
         """Attempt to load from HuggingFace Hub."""
@@ -108,12 +100,18 @@ class EfficientFaceModel(EmotionModelBase):
                     filename="efficientface_affectnet8.pth",
                     cache_dir=str(cache_dir),
                 )
-            except Exception:
-                # HF model not found — try local cache
-                local = cache_dir / "efficientface_affectnet8.pth"
-                if not local.exists():
+            except Exception as e:
+                logger.warning("efficientface_hf_download_failed_trying_offline", error=str(e))
+                try:
+                    weights_path = hf_hub_download(
+                        repo_id=_HF_MODEL_ID,
+                        filename="efficientface_affectnet8.pth",
+                        cache_dir=str(cache_dir),
+                        local_files_only=True,
+                    )
+                except Exception as e_cache:
+                    logger.error("efficientface_cache_load_failed", error=str(e_cache))
                     return False
-                weights_path = str(local)
 
             self._torch = torch
             self._device = torch.device(
@@ -155,8 +153,9 @@ class EfficientFaceModel(EmotionModelBase):
 
             self._model = model
             self._mode = "hf"
+            self._checkpoint_path = weights_path
             self._build_transforms()
-            logger.info("efficientface_loaded_hf", device=str(self._device))
+            logger.info("efficientface_loaded_hf", device=str(self._device), checkpoint=weights_path)
             return True
 
         except Exception as exc:
@@ -242,30 +241,79 @@ class EfficientFaceModel(EmotionModelBase):
         return tensor.to(self._device)
 
     def _predict_impl(self, face_crop_rgb: np.ndarray) -> EmotionPrediction:
-        if self._mode == "fallback":
-            return self._heuristic_predict(face_crop_rgb)
+        if self._mode not in ("hf", "onnx"):
+            raise RuntimeError(f"EfficientFace model is not loaded in fine-tuned mode. Mode: {self._mode}")
 
         import torch
         import torch.nn.functional as F
 
         try:
+            t_start = time.perf_counter()
             x = self._preprocess(face_crop_rgb)
             with torch.no_grad():
                 logits = self._model(x)
                 probs = F.softmax(logits[0], dim=-1).cpu().numpy()
+            latency_ms = (time.perf_counter() - t_start) * 1000.0
 
-            top_idx = int(np.argmax(probs))
+            raw_logits = logits[0].cpu().numpy().tolist()
             probabilities = {EMOTION_LABELS[i]: float(probs[i]) for i in range(NUM_CLASSES)}
+            top_emotion = max(probabilities, key=probabilities.get)
+            raw_top_conf = probabilities[top_emotion]
+
+            from app.utils.calibration import temperature_scale_probs
+            calibrated_probs = temperature_scale_probs(probabilities, temperature=1.35)
+            calibrated_top_emotion = max(calibrated_probs, key=calibrated_probs.get)
+            calibrated_top_conf = calibrated_probs[calibrated_top_emotion]
+
+            # Detailed inference audit logging
+            logger.info(
+                "efficientface_inference_details",
+                logits=raw_logits,
+                probabilities=probabilities,
+                calibrated_probabilities=calibrated_probs,
+                predicted_emotion=calibrated_top_emotion,
+                confidence=calibrated_top_conf,
+                checkpoint=self._checkpoint_path,
+                latency_ms=round(latency_ms, 2),
+            )
+
+            # Debug mode file saving
+            if settings.DL_DEBUG_MODE:
+                import json
+                debug_dir = Path("/Users/mdmehedihassan/Desktop/Projects/AuthBrain_AI_Face_Analysis/backend/debug_inference")
+                debug_dir.mkdir(parents=True, exist_ok=True)
+                timestamp = int(time.time() * 1000)
+                
+                # Save preprocessed image as tensor
+                np.save(str(debug_dir / f"preprocessed_{timestamp}_efficientface.npy"), x.cpu().numpy())
+                
+                inf_data = {
+                    "model_id": self.model_id,
+                    "timestamp": timestamp,
+                    "device": str(self._device),
+                    "checkpoint_path": self._checkpoint_path,
+                    "evaluation_mode": not self._model.training,
+                    "raw_logits": raw_logits,
+                    "softmax_probabilities": probabilities,
+                    "calibrated_probabilities": calibrated_probs,
+                    "predicted_emotion": calibrated_top_emotion,
+                    "confidence": calibrated_top_conf,
+                    "latency_ms": latency_ms,
+                }
+                with open(debug_dir / f"inference_{timestamp}_efficientface.json", "w") as f:
+                    json.dump(inf_data, f, indent=2)
 
             return EmotionPrediction(
-                emotion=EMOTION_LABELS[top_idx],
-                confidence=float(probs[top_idx]),
-                probabilities=probabilities,
+                emotion=calibrated_top_emotion,
+                confidence=calibrated_top_conf,
+                probabilities=calibrated_probs,
+                raw_confidence=raw_top_conf,
+                raw_probabilities=probabilities,
                 model_id=self.model_id,
             )
         except Exception as exc:
-            logger.warning("efficientface_predict_error", error=str(exc))
-            return self._heuristic_predict(face_crop_rgb)
+            logger.error("efficientface_predict_failed", error=str(exc))
+            raise RuntimeError(f"EfficientFace prediction failed: {exc}")
 
     def _heuristic_predict(self, face_crop_rgb: np.ndarray) -> EmotionPrediction:
         """Minimal heuristic — brightness/contrast based emotion estimate."""
@@ -287,5 +335,7 @@ class EfficientFaceModel(EmotionModelBase):
             emotion=top,
             confidence=probs[top],
             probabilities=probs,
+            raw_confidence=probs[top],
+            raw_probabilities=probs,
             model_id=f"{self.model_id}_heuristic",
         )

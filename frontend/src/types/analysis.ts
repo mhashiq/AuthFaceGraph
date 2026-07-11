@@ -132,6 +132,7 @@ export interface FaceAnalysisResult {
   active_face_index: number;
   bounding_box: FaceBoundingBox | null;
   landmark_count: number;
+  landmarks?: Landmark[];
   head_pose: HeadPoseResult | null;
   eyes: EyeAnalysisResult | null;
   mouth: MouthAnalysisResult | null;
@@ -155,8 +156,12 @@ export interface DLEmotionPrediction {
   emotion: EmotionLabel;
   confidence: number;
   probabilities: Record<string, number>;
+  raw_confidence?: number;
+  calibrated_confidence?: number;
   model_id: string;
   latency_ms: number;
+  status?: string;
+  error?: string | null;
 }
 
 export interface ActionUnit {
@@ -170,9 +175,15 @@ export interface GNNPrediction {
   emotion: EmotionLabel;
   confidence: number;
   probabilities: Record<string, number>;
+  raw_confidence?: number;
+  calibrated_confidence?: number;
   model_id: string;
   node_importance: number[];
   edge_attention: number[];
+  edge_index?: number[][];
+  latency_ms?: number;
+  status?: string;
+  error?: string | null;
 }
 
 export interface EnsembleResult {
@@ -182,6 +193,9 @@ export interface EnsembleResult {
   model_predictions: DLEmotionPrediction[];
   disagreement_score: number;
   uncertainty: number;
+  agreement_score?: number;
+  raw_confidence?: number;
+  calibrated_confidence?: number;
 }
 
 export interface DLAnalysisResult {
@@ -194,6 +208,7 @@ export interface DLAnalysisResult {
   models_used: string[];
   xai_explanations: ExplanationResult[];
   landmarks: Landmark[];
+  model_health?: Record<string, any>;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

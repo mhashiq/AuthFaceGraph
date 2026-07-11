@@ -79,7 +79,7 @@ class TestRuleEngine:
     def test_critical_rule_matches_low_ear(self):
         """RULE_EXTREMELY_LOW_EAR should trigger for EAR < 0.15."""
         engine  = RuleEngine()
-        ctx     = make_context(avg_ear=0.10)
+        ctx     = make_context(avg_ear=0.10, eye_closure_ms=500.0)
         matches = engine.evaluate(ctx)
         rule_ids = [m.rule_id for m in matches]
         assert "RULE_EXTREMELY_LOW_EAR" in rule_ids
@@ -112,7 +112,7 @@ class TestRuleEngine:
         """Matches should be sorted critical > high > medium > low."""
         engine  = RuleEngine()
         # Trigger multiple rules at once
-        ctx     = make_context(avg_ear=0.10, yaw=35.0, quality_score=0.3, stability=0.4)
+        ctx     = make_context(avg_ear=0.10, eye_closure_ms=500.0, yaw=35.0, quality_score=0.3, stability=0.4)
         matches = engine.evaluate(ctx)
 
         severity = {"critical": 0, "high": 1, "medium": 2, "low": 3}
@@ -122,7 +122,7 @@ class TestRuleEngine:
     def test_confidence_in_valid_range(self):
         """All rule confidences should be in [0, 1]."""
         engine  = RuleEngine()
-        ctx     = make_context(avg_ear=0.10, yaw=45.0, yawn_detected=True)
+        ctx     = make_context(avg_ear=0.10, eye_closure_ms=500.0, yaw=45.0, yawn_detected=True)
         matches = engine.evaluate(ctx)
         for m in matches:
             assert 0.0 <= m.confidence <= 1.0, f"Rule {m.rule_id} confidence {m.confidence} out of range"

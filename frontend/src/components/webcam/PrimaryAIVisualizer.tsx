@@ -11,7 +11,16 @@ const LANDMARK_REGIONS = {
   leftEyebrow: [70, 63, 105, 66, 107, 55, 117, 124],
   rightEyebrow: [300, 293, 334, 296, 336, 285, 346, 353],
   nose: [168, 6, 197, 195, 5, 4, 1, 19, 94, 2, 323, 356, 93, 132, 324, 141],
-  lips: [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 146, 91, 181, 84, 17, 314, 405, 405, 321, 321, 375, 375],
+  lips: [
+    // Lips Upper Outer
+    61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291,
+    // Lips Lower Outer
+    146, 91, 181, 84, 17, 314, 405, 321, 375,
+    // Lips Upper Inner
+    78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308,
+    // Lips Lower Inner
+    95, 88, 178, 87, 14, 317, 402, 318, 324
+  ],
 };
 
 const getRegionName = (idx: number): string => {
@@ -45,11 +54,48 @@ const MESH_CONNECTIONS = [
   // Nose Bridge & Base
   [168, 6], [6, 197], [197, 195], [195, 5], [5, 4], [4, 1], [1, 19], [19, 94], [94, 2],
   [2, 323], [323, 356], [2, 93], [93, 132], [94, 324], [324, 323], [94, 141], [141, 93],
-  // Lips / Mouth
+  // Lips / Mouth Outer
   [61, 185], [185, 40], [40, 39], [39, 37], [37, 0], [0, 267], [267, 269], [269, 270],
   [270, 409], [409, 291], [61, 146], [146, 91], [91, 181], [181, 84], [84, 17], [17, 314],
-  [314, 405], [405, 321], [321, 375], [375, 291]
+  [314, 405], [405, 321], [321, 375], [375, 291],
+  // Lips / Mouth Inner
+  [78, 191], [191, 80], [80, 81], [81, 82], [82, 13], [13, 312], [312, 311], [311, 310], [310, 415], [415, 308],
+  [78, 95], [95, 88], [88, 178], [178, 87], [87, 14], [14, 317], [317, 402], [402, 318], [318, 324], [324, 308]
 ];
+
+const SKELETON_CONNECTIONS = [
+  [168, 6], [6, 197], [197, 195], [195, 5], [5, 4], [4, 1], [1, 19],
+  [168, 33], [168, 362], [33, 133], [362, 263],
+  [61, 291], [291, 308], [308, 324], [324, 78], [78, 61],
+  [0, 17], [17, 84], [84, 181], [181, 314], [314, 405], [405, 321],
+  [10, 152], [152, 234], [234, 454], [454, 323]
+];
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const getNodeRadius = (importance: number, kind: 'mesh' | 'graph' | 'heatmap' | 'xai') => {
+  if (kind === 'graph') return 2;
+  if (kind === 'heatmap') return 2;
+  if (kind === 'xai') return importance > 0.65 ? 3 : importance > 0.35 ? 2.5 : 2;
+  return 1.75;
+};
+
+const getImportanceColor = (importance: number) => {
+  if (importance > 0.8) return 'rgba(239, 68, 68, 1)';
+  if (importance > 0.65) return 'rgba(249, 115, 22, 1)';
+  if (importance > 0.45) return 'rgba(234, 179, 8, 1)';
+  if (importance > 0.25) return 'rgba(34, 197, 94, 1)';
+  return 'rgba(59, 130, 246, 1)';
+};
+
+const getRegionCenter = (landmarks: Landmark[], indices: number[]) => {
+  const pts = indices.map(i => landmarks[i]).filter(Boolean);
+  if (pts.length === 0) return null;
+  const sum = pts.reduce((acc, lm) => ({ x: acc.x + lm.x, y: acc.y + lm.y }), { x: 0, y: 0 });
+  return { x: sum.x / pts.length, y: sum.y / pts.length };
+};
+
+const TOGGLE_BASE = 'inline-flex items-center justify-center gap-1 h-7 px-2.5 rounded-full border text-[10px] font-mono font-semibold transition-all duration-150';
 
 export const PrimaryAIVisualizer: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -57,6 +103,7 @@ export const PrimaryAIVisualizer: React.FC = () => {
   const latestResult = useAnalysisStore(s => s.latestResult);
   const activeAlerts = useAnalysisStore(s => s.activeAlerts);
   const [isResearchMode, setResearchMode] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
 
   // Toggles for different viz options
   const [showCamera, setShowCamera] = useState(true);
@@ -91,6 +138,9 @@ export const PrimaryAIVisualizer: React.FC = () => {
   // Particle flows animation state
   const particleOffsetRef = useRef(0);
 
+  // Temporal smoothing for GNN node importance values (EMA)
+  const smoothedImportanceRef = useRef<number[]>(new Array(478).fill(0));
+
   useEffect(() => {
     let animationFrameId: number;
 
@@ -121,31 +171,34 @@ export const PrimaryAIVisualizer: React.FC = () => {
       ctx.fillStyle = '#020408';
       ctx.fillRect(0, 0, width, height);
 
-      if (showCamera && isRunning && video && video.readyState >= 2) {
-        ctx.save();
-        // Set context alpha and apply grayscale matrix for premium scientific overlay feel
-        ctx.globalAlpha = 0.45;
-        ctx.filter = 'grayscale(60%) contrast(120%)';
-        
-        // Render video background maintaining aspect ratio (cover)
+      let drawW = width;
+      let drawH = height;
+      let dx = 0;
+      let dy = 0;
+
+      if (video && video.videoWidth > 0 && video.videoHeight > 0) {
         const vWidth = video.videoWidth;
         const vHeight = video.videoHeight;
         const videoRatio = vWidth / vHeight;
         const canvasRatio = width / height;
 
-        let drawW = width;
-        let drawH = height;
-        let dx = 0;
-        let dy = 0;
-
         if (canvasRatio > videoRatio) {
+          drawW = width;
           drawH = width / videoRatio;
+          dx = 0;
           dy = (height - drawH) / 2;
         } else {
           drawW = height * videoRatio;
+          drawH = height;
           dx = (width - drawW) / 2;
+          dy = 0;
         }
+      }
 
+      if (showCamera && isRunning && video && video.readyState >= 2) {
+        ctx.save();
+        ctx.globalAlpha = 0.45;
+        ctx.filter = 'grayscale(60%) contrast(120%)';
         ctx.drawImage(video, dx, dy, drawW, drawH);
         ctx.restore();
       }
@@ -163,264 +216,275 @@ export const PrimaryAIVisualizer: React.FC = () => {
       ctx.stroke();
 
       const dl = latestResult?.deep_learning;
-      const lms = dl?.landmarks || [];
+      const lms = latestResult?.landmarks || dl?.landmarks || latestResult?.deep_learning?.landmarks;
 
-      if (isRunning && lms.length > 0) {
-        // Determine if we should use orbit projection or direct mapping
-        const useOrbit = !showCamera || yaw !== 0 || pitch !== 0 || zoom !== 1.0;
+      if (isRunning && lms && lms.length > 0) {
+        // Use the backend bounding box for size/debug only. Landmark coordinates themselves
+        // are normalized frame coordinates and must be plotted directly in canvas space.
+        const faceBox = latestResult?.bounding_box;
+        let minX = 1, minY = 1, maxX = 0, maxY = 0;
+        lms.forEach((lm: Landmark) => {
+          if (lm.x < minX) minX = lm.x;
+          if (lm.y < minY) minY = lm.y;
+          if (lm.x > maxX) maxX = lm.x;
+          if (lm.y > maxY) maxY = lm.y;
+        });
+
+        const faceW = Math.max(0.001, (faceBox?.width ?? (maxX - minX)));
+        const faceH = Math.max(0.001, (faceBox?.height ?? (maxY - minY)));
+        const faceCenterX = faceBox ? (faceBox.x + faceBox.width / 2) : (minX + (maxX - minX) / 2);
+        const faceCenterY = faceBox ? (faceBox.y + faceBox.height / 2) : (minY + (maxY - minY) / 2);
+
+        // Compute smooth node importance weights using exponential moving average (EMA)
+        const alpha = 0.25;
+        const smoothedImps = new Array(lms.length).fill(0);
+        lms.forEach((lm: Landmark, idx: number) => {
+          const rawImp = dl?.gnn_prediction?.node_importance?.[idx] ?? 0;
+          if (smoothedImportanceRef.current[idx] === undefined) {
+            smoothedImportanceRef.current[idx] = 0;
+          }
+          smoothedImportanceRef.current[idx] = alpha * rawImp + (1 - alpha) * (smoothedImportanceRef.current[idx] || 0);
+          smoothedImps[idx] = smoothedImportanceRef.current[idx];
+        });
+
         const projected: { x: number; y: number; z: number; importance: number; idx: number }[] = [];
+        const faceFootprintPx = showCamera
+          ? Math.max(faceW * drawW, faceH * drawH)
+          : Math.max(faceW * width, faceH * height);
+        const overlayScale = Math.max(1.3, Math.min(4.8, faceFootprintPx / 70));
 
-        if (useOrbit) {
-          // Centered 3D Auto-scaled view (with Yaw/Pitch/Zoom rotation)
-          let minX = 1, maxX = 0, minY = 1, maxY = 0;
-          lms.forEach((lm: Landmark) => {
-            if (lm.x < minX) minX = lm.x;
-            if (lm.x > maxX) maxX = lm.x;
-            if (lm.y < minY) minY = lm.y;
-            if (lm.y > maxY) maxY = lm.y;
-          });
+        const faceRect = {
+          x: showCamera ? dx + (faceBox?.x ?? minX) * drawW : (faceBox?.x ?? minX) * width,
+          y: showCamera ? dy + (faceBox?.y ?? minY) * drawH : (faceBox?.y ?? minY) * height,
+          w: showCamera ? faceW * drawW : faceW * width,
+          h: showCamera ? faceH * drawH : faceH * height,
+        };
 
-          const faceW = maxX - minX;
-          const faceH = maxY - minY;
-          
-          const scaleX = width / (faceW + 0.15);
-          const scaleY = height / (faceH + 0.15);
-          const scale = Math.min(scaleX, scaleY) * zoom;
+        const toScreen = (lm: Landmark) => ({
+          x: showCamera ? dx + lm.x * drawW : lm.x * width,
+          y: showCamera ? dy + lm.y * drawH : lm.y * height,
+        });
 
-          const centerX = minX + faceW / 2;
-          const centerY = minY + faceH / 2;
-
-          const screenCenterX = width / 2;
-          const screenCenterY = height / 2;
-
-          const cosY = Math.cos(yaw);
-          const sinY = Math.sin(yaw);
-          const cosP = Math.cos(pitch);
-          const sinP = Math.sin(pitch);
-
-          lms.forEach((lm: Landmark, idx: number) => {
-            const xc = lm.x - centerX;
-            const yc = lm.y - centerY;
-            const zc = lm.z || 0;
-
-            const xRotY = xc * cosY - zc * sinY;
-            const zRotY = xc * sinY + zc * cosY;
-
-            const yRotX = yc * cosP - zRotY * sinP;
-            const zRotX = yc * sinP + zRotY * cosP;
-
-            const screenX = xRotY * scale + screenCenterX;
-            const screenY = yRotX * scale + screenCenterY;
-
-            const imp = dl?.gnn_prediction?.node_importance?.[idx] ?? 0;
-
-            projected.push({
-              x: screenX,
-              y: screenY,
-              z: zRotX,
-              importance: imp,
-              idx
-            });
-          });
-        } else {
-          // Direct camera alignment mapping: matches the background video frame perfectly
-          lms.forEach((lm: Landmark, idx: number) => {
-            const screenX = dx + lm.x * drawW;
-            const screenY = dy + lm.y * drawH;
-            const zRotX = lm.z || 0;
-            const imp = dl?.gnn_prediction?.node_importance?.[idx] ?? 0;
-
-            projected.push({
-              x: screenX,
-              y: screenY,
-              z: zRotX,
-              importance: imp,
-              idx
-            });
-          });
+        const meshConnections = MESH_CONNECTIONS;
+        const skeletonConnections = SKELETON_CONNECTIONS;
+        const hasEdgeAttention = Boolean(dl?.gnn_prediction?.edge_index && dl.gnn_prediction.edge_index.length === 2);
+        const edgeAttentionMap = new Map<string, number>();
+        let maxAtt = 0.001;
+        if (hasEdgeAttention) {
+          const edgeIndex = dl!.gnn_prediction!.edge_index!;
+          const edgeAttention = dl!.gnn_prediction!.edge_attention || [];
+          const numEdges = edgeIndex[0].length;
+          for (let i = 0; i < numEdges; i++) {
+            const u = edgeIndex[0][i];
+            const v = edgeIndex[1][i];
+            const attVal = edgeAttention[i] ?? 0.05;
+            if (attVal > maxAtt) maxAtt = attVal;
+            const key = u < v ? `${u}-${v}` : `${v}-${u}`;
+            edgeAttentionMap.set(key, Math.max(edgeAttentionMap.get(key) || 0, attVal));
+          }
         }
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(168, 85, 247, 0.28)';
+        ctx.lineWidth = 1.25 * overlayScale;
+        ctx.setLineDash([6 * overlayScale, 5 * overlayScale]);
+        ctx.strokeRect(faceRect.x, faceRect.y, faceRect.w, faceRect.h);
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(168, 85, 247, 0.08)';
+        ctx.fillRect(faceRect.x, faceRect.y, faceRect.w, faceRect.h);
+        ctx.restore();
+
+        lms.forEach((lm: Landmark, idx: number) => {
+          const screen = toScreen(lm);
+          projected.push({ x: screen.x, y: screen.y, z: lm.z || 0, importance: smoothedImps[idx], idx });
+        });
 
         projectedPointsRef.current = projected.map(p => ({ x: p.x, y: p.y, idx: p.idx }));
 
-        // ── 2. Draw Attention Heatmap (if enabled) ───────────────────────────
-        if (showHeatmap && showXAI) {
-          projected.forEach(p => {
-            if (p.importance > 0.18) {
-              const rad = p.importance * 20; // scaled down slightly
-              const grad = ctx.createRadialGradient(p.x, p.y, 1, p.x, p.y, rad);
-              grad.addColorStop(0, `rgba(239, 68, 68, ${p.importance * 0.45})`);
-              grad.addColorStop(0.5, `rgba(245, 158, 11, ${p.importance * 0.2})`);
-              grad.addColorStop(1, 'rgba(245, 158, 11, 0)');
+        // ── 2. Camera / Bounding Box layers ──────────────────────────────────
+        // Camera is already drawn above. Bounding box remains visible as a separate layer.
 
-              ctx.fillStyle = grad;
-              ctx.beginPath();
-              ctx.arc(p.x, p.y, rad, 0, 2 * Math.PI);
-              ctx.fill();
-            }
+        // ── 3. Face Mesh layer ───────────────────────────────────────────────
+        if (showMesh) {
+          meshConnections.forEach(([p1, p2]) => {
+            const pt1 = projected[p1];
+            const pt2 = projected[p2];
+            if (!pt1 || !pt2) return;
+
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.moveTo(pt1.x, pt1.y);
+            ctx.lineTo(pt2.x, pt2.y);
+            ctx.stroke();
+          });
+
+          projected.forEach(p => {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 1.75, 0, 2 * Math.PI);
+            ctx.fill();
           });
         }
 
-        // ── 3. Draw Connections / Edges ─────────────────────────────────────
-        const connectionsToUse = showSkeleton 
-          ? MESH_CONNECTIONS.filter(([p1]) => 
-              LANDMARK_REGIONS.leftEye.includes(p1) || 
-              LANDMARK_REGIONS.rightEye.includes(p1) || 
-              LANDMARK_REGIONS.lips.includes(p1)
-            )
-          : MESH_CONNECTIONS;
-
-        if (showMesh) {
-          connectionsToUse.forEach(([p1, p2]) => {
+        // ── 4. Skeleton layer ────────────────────────────────────────────────
+        if (showSkeleton) {
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+          ctx.lineWidth = 0.8;
+          skeletonConnections.forEach(([p1, p2]) => {
             const pt1 = projected[p1];
             const pt2 = projected[p2];
+            if (!pt1 || !pt2) return;
+            ctx.beginPath();
+            ctx.moveTo(pt1.x, pt1.y);
+            ctx.lineTo(pt2.x, pt2.y);
+            ctx.stroke();
+          });
+        }
 
-            if (pt1 && pt2) {
-              const avgImp = (pt1.importance + pt2.importance) / 2;
+        // ── 5. GNN Graph layer ───────────────────────────────────────────────
+        if (showGraph) {
+          const edgeAlpha = 0.5;
+          const graphNodes = projected;
+          const edgeIndex = dl?.gnn_prediction?.edge_index;
+          const edgeAttention = dl?.gnn_prediction?.edge_attention || [];
+          if (edgeIndex && edgeIndex.length === 2) {
+            const numEdges = edgeIndex[0].length;
+            for (let i = 0; i < numEdges; i++) {
+              const u = edgeIndex[0][i];
+              const v = edgeIndex[1][i];
+              const pt1 = graphNodes[u];
+              const pt2 = graphNodes[v];
+              if (!pt1 || !pt2) continue;
 
-              // Thinner connection widths for cleaner aesthetic
-              if (showGraph) {
-                if (avgImp > 0.5) {
-                  ctx.strokeStyle = `rgba(239, 68, 68, ${0.4 + avgImp * 0.6})`; 
-                  ctx.lineWidth = 0.95;
-                } else if (avgImp > 0.3) {
-                  ctx.strokeStyle = `rgba(245, 158, 11, ${0.35 + avgImp * 0.5})`; 
-                  ctx.lineWidth = 0.65;
-                } else if (avgImp > 0.15) {
-                  ctx.strokeStyle = `rgba(16, 185, 129, ${0.25 + avgImp * 0.4})`; 
-                  ctx.lineWidth = 0.45;
-                } else {
-                  ctx.strokeStyle = 'rgba(99, 102, 241, 0.14)'; 
-                  ctx.lineWidth = 0.3;
-                }
-              } else {
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-                ctx.lineWidth = 0.3;
-              }
-
+              const att = edgeAttention[i] ?? 0.05;
+              ctx.strokeStyle = `rgba(59, 130, 246, ${clamp(edgeAlpha + att * 0.4, 0.5, 0.95)})`;
+              ctx.lineWidth = att > 0.35 ? 1.5 : 1.0;
               ctx.beginPath();
               ctx.moveTo(pt1.x, pt1.y);
               ctx.lineTo(pt2.x, pt2.y);
               ctx.stroke();
-
-              // Moving information flow particle lines
-              if (showGraph && avgImp > 0.3) {
-                const particlePos = particleOffsetRef.current;
-                const px = pt1.x + (pt2.x - pt1.x) * particlePos;
-                const py = pt1.y + (pt2.y - pt1.y) * particlePos;
-
-                ctx.fillStyle = avgImp > 0.5 ? '#ef4444' : '#f59f0b';
-                ctx.beginPath();
-                ctx.arc(px, py, 0.8, 0, 2 * Math.PI);
-                ctx.fill();
-              }
             }
+          }
+
+          graphNodes.forEach(p => {
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.9)';
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 2, 0, 2 * Math.PI);
+            ctx.fill();
           });
         }
 
-        // ── 4. Draw Nodes / Landmarks ────────────────────────────────────────
-        projected.forEach(p => {
-          const isHighAct = p.importance > 0.5;
-          const isActive = p.importance > 0.15;
-
-          if (showXAI && isActive) {
-            // Elegant, smaller node sizes
-            const rad = isHighAct ? 1.8 + p.importance * 1.8 : 1.0 + p.importance * 1.2;
-            
-            ctx.fillStyle = isHighAct 
-              ? `rgba(239, 68, 68, ${0.7 + p.importance * 0.3})`  
-              : `rgba(245, 158, 11, ${0.6 + p.importance * 0.4})`; 
-
+        // ── 6. Heatmap layer ────────────────────────────────────────────────
+        if (showHeatmap) {
+          projected.forEach(p => {
+            if (p.importance <= 0.02) return;
+            const opacity = clamp(0.08 + p.importance * 0.55, 0.08, 0.65);
+            ctx.fillStyle = getImportanceColor(p.importance).replace('1)', `${opacity})`);
             ctx.beginPath();
-            ctx.arc(p.x, p.y, rad, 0, 2 * Math.PI);
+            ctx.arc(p.x, p.y, 2, 0, 2 * Math.PI);
             ctx.fill();
+          });
+        }
 
-            // Tight, micro pulsing ring (very subtle radar effect)
-            ctx.strokeStyle = isHighAct ? 'rgba(239, 68, 68, 0.35)' : 'rgba(245, 158, 11, 0.25)';
-            ctx.lineWidth = 0.45;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, rad + (Math.sin(Date.now() / 200) * 0.5 + 0.8), 0, 2 * Math.PI);
-            ctx.stroke();
-          } else {
-            // Very small, crisp inactive node
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, 0.55, 0, 2 * Math.PI);
-            ctx.fill();
-          }
-        });
+        // ── 7. XAI layer ────────────────────────────────────────────────────
+        if (showXAI) {
+          const ranked = projected
+            .map(p => ({ ...p, score: Math.max(p.importance, dl?.gnn_prediction?.node_importance?.[p.idx] ?? 0) }))
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 16);
 
-        // ── 5. Draw Eye Gaze Vectors ─────────────────────────────────────────
-        if (latestResult?.eyes) {
-          const lIris = projected[468]; // left iris center
-          const rIris = projected[473]; // right iris center
-          if (lIris && rIris) {
-            let dx = 0, dy = 0;
-            const gaze = latestResult.eyes.gaze_direction;
-            if (gaze === 'left') dx = -20;
-            else if (gaze === 'right') dx = 20;
-            else if (gaze === 'up') dy = -20;
-            else if (gaze === 'down') dy = 20;
+          const importantIndices = new Set(ranked.map(p => p.idx));
+          const importantRegions = [
+            { name: 'nose', indices: LANDMARK_REGIONS.nose },
+            { name: 'leftEye', indices: LANDMARK_REGIONS.leftEye },
+            { name: 'rightEye', indices: LANDMARK_REGIONS.rightEye },
+            { name: 'lips', indices: LANDMARK_REGIONS.lips },
+            { name: 'leftEyebrow', indices: LANDMARK_REGIONS.leftEyebrow },
+            { name: 'rightEyebrow', indices: LANDMARK_REGIONS.rightEyebrow },
+          ]
+            .map(region => ({ ...region, center: getRegionCenter(lms, region.indices) }))
+            .filter(region => region.center !== null);
 
-            ctx.strokeStyle = 'rgba(34, 211, 238, 0.85)'; // Gaze vector color (cyan)
-            ctx.lineWidth = 1.5;
+          const xaiEdges = dl?.gnn_prediction?.edge_index;
+          if (xaiEdges && xaiEdges.length === 2) {
+            const edgeAttention = dl?.gnn_prediction?.edge_attention || [];
+            for (let i = 0; i < xaiEdges[0].length; i++) {
+              const u = xaiEdges[0][i];
+              const v = xaiEdges[1][i];
+              if (!importantIndices.has(u) && !importantIndices.has(v)) continue;
+              const pt1 = projected[u];
+              const pt2 = projected[v];
+              if (!pt1 || !pt2) continue;
 
-            // Draw arrow from iris centers
-            [lIris, rIris].forEach(iris => {
+              const att = edgeAttention[i] ?? 0.1;
+              ctx.strokeStyle = `rgba(245, 158, 11, ${clamp(0.25 + att * 0.75, 0.25, 0.9)})`;
+              ctx.lineWidth = 1.5;
               ctx.beginPath();
-              ctx.moveTo(iris.x, iris.y);
-              ctx.lineTo(iris.x + dx, iris.y + dy);
+              ctx.moveTo(pt1.x, pt1.y);
+              ctx.lineTo(pt2.x, pt2.y);
               ctx.stroke();
-
-              // Draw Arrowhead
-              ctx.fillStyle = 'rgba(34, 211, 238, 0.85)';
-              ctx.beginPath();
-              ctx.arc(iris.x + dx, iris.y + dy, 2, 0, 2 * Math.PI);
-              ctx.fill();
-            });
+            }
           }
+
+          ranked.forEach(p => {
+            ctx.fillStyle = 'rgba(245, 158, 11, 0.85)';
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, getNodeRadius(p.score, 'xai'), 0, 2 * Math.PI);
+            ctx.fill();
+
+            ctx.strokeStyle = 'rgba(245, 158, 11, 0.25)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, getNodeRadius(p.score, 'xai') + (Math.sin(Date.now() / 180) * 0.4 + 0.8), 0, 2 * Math.PI);
+            ctx.stroke();
+          });
+
+          importantRegions.forEach(region => {
+            if (!region.center) return;
+            const screen = toScreen({ x: region.center.x, y: region.center.y, z: 0 } as Landmark);
+            ctx.strokeStyle = 'rgba(245, 158, 11, 0.15)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(screen.x, screen.y, 22, 0, 2 * Math.PI);
+            ctx.stroke();
+          });
         }
 
-        // ── 6. Draw 3D Head Pose Axes ────────────────────────────────────────
-        if (latestResult?.head_pose) {
-          const noseTip = projected[4]; // nose tip index
-          if (noseTip) {
-            const yawRad = latestResult.head_pose.yaw * (Math.PI / 180);
-            const pitchRad = latestResult.head_pose.pitch * (Math.PI / 180);
-            const rollRad = latestResult.head_pose.roll * (Math.PI / 180);
+        // ── 8. Debug overlay ───────────────────────────────────────────────
+        if (showDebug) {
+          const debugX = 16;
+          const debugY = 16;
+          const debugLines = [
+            `FPS: ${latestResult?.fps?.toFixed(1) ?? '—'}`,
+            `Inference: ${latestResult?.inference_time_ms?.toFixed(1) ?? '—'} ms`,
+            `Frame: ${latestResult?.frame_width ?? 0}x${latestResult?.frame_height ?? 0}`,
+            `ROI: ${Math.round(faceRect.x)}, ${Math.round(faceRect.y)}, ${Math.round(faceRect.w)}, ${Math.round(faceRect.h)}`,
+            `BBox: ${faceBox ? `${faceBox.x.toFixed(3)}, ${faceBox.y.toFixed(3)}, ${faceBox.width.toFixed(3)}, ${faceBox.height.toFixed(3)}` : 'n/a'}`,
+            `Nodes: ${projected.length} | Edges: ${meshConnections.length}`,
+            `Nose tip idx 1: ${projected[1] ? `${projected[1].x.toFixed(1)}, ${projected[1].y.toFixed(1)}` : 'n/a'}`,
+          ];
 
-            // X-axis (Pitch - Red)
-            ctx.strokeStyle = '#ef4444';
-            ctx.lineWidth = 2.0;
-            ctx.beginPath();
-            ctx.moveTo(noseTip.x, noseTip.y);
-            ctx.lineTo(noseTip.x + Math.cos(rollRad) * 35, noseTip.y + Math.sin(rollRad) * 35);
-            ctx.stroke();
+          ctx.save();
+          ctx.fillStyle = 'rgba(2, 6, 23, 0.8)';
+          ctx.strokeStyle = 'rgba(148, 163, 184, 0.4)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.roundRect(debugX - 8, debugY - 8, 470, 160, 10);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(226, 232, 240, 0.95)';
+          ctx.font = '11px monospace';
+          debugLines.forEach((line, index) => ctx.fillText(line, debugX, debugY + 14 + index * 18));
 
-            // Y-axis (Yaw - Green)
-            ctx.strokeStyle = '#10b981';
-            ctx.beginPath();
-            ctx.moveTo(noseTip.x, noseTip.y);
-            ctx.lineTo(noseTip.x - Math.sin(yawRad) * 35, noseTip.y - Math.cos(yawRad) * 35);
-            ctx.stroke();
-
-            // Z-axis (Roll - Blue/Cyan)
-            ctx.strokeStyle = '#22d3ee';
-            ctx.beginPath();
-            ctx.moveTo(noseTip.x, noseTip.y);
-            ctx.lineTo(noseTip.x + Math.sin(yawRad) * 20, noseTip.y + Math.cos(pitchRad) * 35);
-            ctx.stroke();
-          }
-        }
-
-        // ── 7. Render Debug Landmark IDs in Research Mode ────────────────────
-        if (isResearchMode) {
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-          ctx.font = '5px monospace';
           projected.forEach((p, idx) => {
-            if (idx % 4 === 0) { // space them out
-              ctx.fillText(idx.toString(), p.x + 2, p.y + 1);
+            if (idx % 12 === 0) {
+              const lm = lms[idx];
+              ctx.fillStyle = 'rgba(226, 232, 240, 0.8)';
+              ctx.fillText(`${idx}:${lm.x.toFixed(3)},${lm.y.toFixed(3)}`, p.x + 4, p.y - 4);
             }
           });
+          ctx.restore();
         }
       }
 
@@ -446,7 +510,7 @@ export const PrimaryAIVisualizer: React.FC = () => {
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, [isRunning, latestResult, showCamera, showMesh, showGraph, showHeatmap, showSkeleton, showXAI, yaw, pitch, zoom, hoveredNode, isResearchMode]);
+  }, [isRunning, latestResult, showCamera, showMesh, showGraph, showHeatmap, showSkeleton, showXAI, showDebug, hoveredNode, isResearchMode]);
 
   // Handle Drag / Rotation Mouse events
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -513,7 +577,6 @@ export const PrimaryAIVisualizer: React.FC = () => {
 
   // Zoom control
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
     setZoom(prev => Math.max(0.4, Math.min(3.0, prev - e.deltaY * 0.001)));
   };
 
@@ -641,54 +704,62 @@ export const PrimaryAIVisualizer: React.FC = () => {
       </div>
 
       {/* Control Panel Strip (Microsoft/Azure AI minimal grid design) */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 bg-slate-950/30 border border-dark-600/20 rounded-xl p-2 z-10">
+      <div className="flex flex-wrap gap-2 bg-slate-950/30 border border-dark-600/20 rounded-xl p-2 z-10">
         <button
           onClick={() => setShowCamera(!showCamera)}
-          className={`py-1.5 rounded-lg border text-[10px] font-bold font-mono transition-all uppercase ${
-            showCamera ? 'bg-violet-500/10 border-violet-500/40 text-violet-400' : 'bg-transparent border-dark-600/40 text-dark-400'
+          className={`${TOGGLE_BASE} ${
+            showCamera ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300' : 'bg-transparent border-dark-600/40 text-dark-400'
           }`}
         >
-          Camera
+          <Camera size={11} /> Camera <span className="opacity-80">{showCamera ? 'ON' : 'OFF'}</span>
         </button>
         <button
           onClick={() => setShowMesh(!showMesh)}
-          className={`py-1.5 rounded-lg border text-[10px] font-bold font-mono transition-all uppercase ${
-            showMesh ? 'bg-violet-500/10 border-violet-500/40 text-violet-400' : 'bg-transparent border-dark-600/40 text-dark-400'
+          className={`${TOGGLE_BASE} ${
+            showMesh ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300' : 'bg-transparent border-dark-600/40 text-dark-400'
           }`}
         >
-          Mesh
+          <span>•</span> Mesh <span className="opacity-80">{showMesh ? 'ON' : 'OFF'}</span>
         </button>
         <button
           onClick={() => setShowGraph(!showGraph)}
-          className={`py-1.5 rounded-lg border text-[10px] font-bold font-mono transition-all uppercase ${
-            showGraph ? 'bg-violet-500/10 border-violet-500/40 text-violet-400' : 'bg-transparent border-dark-600/40 text-dark-400'
+          className={`${TOGGLE_BASE} ${
+            showGraph ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300' : 'bg-transparent border-dark-600/40 text-dark-400'
           }`}
         >
-          GNN Graph
+          <Layout size={11} /> Graph <span className="opacity-80">{showGraph ? 'ON' : 'OFF'}</span>
         </button>
         <button
           onClick={() => setShowHeatmap(!showHeatmap)}
-          className={`py-1.5 rounded-lg border text-[10px] font-bold font-mono transition-all uppercase ${
-            showHeatmap ? 'bg-violet-500/10 border-violet-500/40 text-violet-400' : 'bg-transparent border-dark-600/40 text-dark-400'
+          className={`${TOGGLE_BASE} ${
+            showHeatmap ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300' : 'bg-transparent border-dark-600/40 text-dark-400'
           }`}
         >
-          Heatmap
+          <span>🔥</span> Heatmap <span className="opacity-80">{showHeatmap ? 'ON' : 'OFF'}</span>
         </button>
         <button
           onClick={() => setShowSkeleton(!showSkeleton)}
-          className={`py-1.5 rounded-lg border text-[10px] font-bold font-mono transition-all uppercase ${
-            showSkeleton ? 'bg-violet-500/10 border-violet-500/40 text-violet-400' : 'bg-transparent border-dark-600/40 text-dark-400'
+          className={`${TOGGLE_BASE} ${
+            showSkeleton ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300' : 'bg-transparent border-dark-600/40 text-dark-400'
           }`}
         >
-          Skeleton
+          <span>╱</span> Skeleton <span className="opacity-80">{showSkeleton ? 'ON' : 'OFF'}</span>
         </button>
         <button
           onClick={() => setShowXAI(!showXAI)}
-          className={`py-1.5 rounded-lg border text-[10px] font-bold font-mono transition-all uppercase ${
-            showXAI ? 'bg-violet-500/10 border-violet-500/40 text-violet-400' : 'bg-transparent border-dark-600/40 text-dark-400'
+          className={`${TOGGLE_BASE} ${
+            showXAI ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300' : 'bg-transparent border-dark-600/40 text-dark-400'
           }`}
         >
-          XAI Layer
+          <span>🧠</span> XAI <span className="opacity-80">{showXAI ? 'ON' : 'OFF'}</span>
+        </button>
+        <button
+          onClick={() => setShowDebug(!showDebug)}
+          className={`${TOGGLE_BASE} ${
+            showDebug ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300' : 'bg-transparent border-dark-600/40 text-dark-400'
+          }`}
+        >
+          <span>🐞</span> Debug <span className="opacity-80">{showDebug ? 'ON' : 'OFF'}</span>
         </button>
       </div>
 

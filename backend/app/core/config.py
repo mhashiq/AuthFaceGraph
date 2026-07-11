@@ -103,9 +103,13 @@ class Settings(BaseSettings):
     # Comma-separated list of enabled emotion model IDs.
     # Available: "hsemotion", "deepface", "gnn_gat"
     DL_EMOTION_MODELS: list[str] = Field(default=["hsemotion"])
+    DL_EMOTION_MIN_CONFIDENCE: float = Field(default=0.15, ge=0.0, le=1.0)
 
     # Enable Graph Neural Network inference
     DL_GNN_ENABLED: bool = True
+
+    # Path to a trained GNN checkpoint. If missing, GNN inference is skipped.
+    DL_GNN_CHECKPOINT_PATH: str = "models/dl/gnn_gat.pt"
 
     # Number of past frames fed to temporal models (LSTM / ST-GCN)
     DL_TEMPORAL_WINDOW: int = Field(default=30, ge=5, le=120)
@@ -120,7 +124,10 @@ class Settings(BaseSettings):
     DL_MODEL_CACHE_DIR: str = "models/dl"
 
     # Per-model inference timeout: skip & log if exceeded
-    DL_INFERENCE_TIMEOUT_MS: float = Field(default=50.0, ge=5.0, le=500.0)
+    DL_INFERENCE_TIMEOUT_MS: float = Field(default=500.0, ge=5.0, le=500.0)
+
+    # Enable backend debug mode to archive frames, crops, and logits
+    DL_DEBUG_MODE: bool = True
 
     # GNN graph edge construction strategy: "anatomical" | "knn" | "radius"
     DL_GRAPH_EDGE_STRATEGY: str = "knn"

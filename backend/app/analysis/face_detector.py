@@ -153,8 +153,15 @@ class FaceDetector:
         self._frame_timestamp_ms += int(1000 / settings.TARGET_FPS)
 
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
-
         result = self._landmarker.detect_for_video(mp_image, self._frame_timestamp_ms)
+
+        # Some webcam/browser combinations deliver frames rotated 180 degrees.
+        # If the first detected face looks upside down, retry on a rotated frame
+        # so landmarks and crops stay aligned with the real face orientation.
+        if result.face_landmarks and self._looks_upside_down(result.face_landmarks[0]):
+            rotated_frame = cv2.rotate(frame_rgb, cv2.ROTATE_180)
+            rotated_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rotated_frame)
+            result = self._landmarker.detect_for_video(rotated_image, self._frame_timestamp_ms)
 
         if not result.face_landmarks:
             return []
@@ -211,6 +218,27 @@ class FaceDetector:
             faces.append(raw)
 
         return faces
+
+    @staticmethod
+    def _looks_upside_down(face_lm_list: list[Any]) -> bool:
+        """Detect 180-degree inverted faces using eye-vs-mouth landmark order."""
+        if not face_lm_list:
+            return False
+
+        eye_indices = (
+            *LANDMARKS.LEFT_EYE_EAR_POINTS,
+            *LANDMARKS.RIGHT_EYE_EAR_POINTS,
+        )
+        mouth_indices = LANDMARKS.MOUTH_MAR_POINTS
+
+        if max(max(eye_indices, default=-1), max(mouth_indices, default=-1)) >= len(face_lm_list):
+            return False
+
+        eye_y = float(np.mean([face_lm_list[i].y for i in eye_indices]))
+        mouth_y = float(np.mean([face_lm_list[i].y for i in mouth_indices]))
+
+        # In an upright face, eyes are above the mouth (smaller y).
+        return eye_y > mouth_y
 
     def close(self) -> None:
         """Release MediaPipe resources."""

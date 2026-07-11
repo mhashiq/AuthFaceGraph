@@ -18,6 +18,8 @@ ImportError when the model is instantiated.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
 from app.core.config import get_settings
@@ -88,6 +90,13 @@ class FaceGAT(GNNModelBase):
                 f"Install: pip install torch torch-geometric\nError: {err}"
             )
 
+        checkpoint_path = Path(settings.DL_GNN_CHECKPOINT_PATH)
+        if not checkpoint_path.exists():
+            raise RuntimeError(
+                f"GNN checkpoint not found at {checkpoint_path}. "
+                f"Provide a trained checkpoint or disable DL_GNN_ENABLED."
+            )
+
         import torch
         import torch.nn as nn
         import torch.nn.functional as F
@@ -126,14 +135,22 @@ class FaceGAT(GNNModelBase):
                     nn.Linear(out_dim // 2, n_classes),
                 )
 
-                # Store last attention weights for XAI
+                # Store last attention weights and edges for XAI
                 self._last_attention: torch.Tensor | None = None
+                self._last_edge_index: torch.Tensor | None = None
 
             def forward(self, x: "torch.Tensor", edge_index: "torch.Tensor", batch: "torch.Tensor | None" = None) -> tuple["torch.Tensor", "torch.Tensor"]:
                 for i, (conv, norm) in enumerate(zip(self.convs, self.norms)):
-                    if i == len(self.convs) - 1 and hasattr(conv, 'return_attention_weights'):
-                        x, (edge_idx, attn) = conv(x, edge_index, return_attention_weights=True)
-                        self._last_attention = attn.detach()
+                    if i == len(self.convs) - 1:
+                        try:
+                            x_out, (edge_idx, attn) = conv(x, edge_index, return_attention_weights=True)
+                            self._last_attention = attn.detach()
+                            self._last_edge_index = edge_idx.detach()
+                            x = x_out
+                        except Exception:
+                            x = conv(x, edge_index)
+                            self._last_attention = None
+                            self._last_edge_index = edge_index
                     else:
                         x = conv(x, edge_index)
                     x = norm(x)
@@ -155,12 +172,20 @@ class FaceGAT(GNNModelBase):
             dropout=self._dropout,
             n_classes=NUM_CLASSES,
         ).to(self._device)
+
+        state = torch.load(checkpoint_path, map_location=self._device)
+        if isinstance(state, dict) and "model_state_dict" in state:
+            state = state["model_state_dict"]
+        elif isinstance(state, dict) and "state_dict" in state:
+            state = state["state_dict"]
+        self._model.load_state_dict(state, strict=False)
         self._model.eval()
 
         logger.info(
             "gat_model_initialized",
             params=sum(p.numel() for p in self._model.parameters()),
             device=self._device_str,
+            checkpoint=str(checkpoint_path),
         )
 
     def _forward_impl(self, graph: FaceGraph) -> GNNPrediction:
@@ -183,19 +208,33 @@ class FaceGAT(GNNModelBase):
         node_importance = torch.norm(node_embeddings, dim=-1).cpu().numpy()
         node_importance = node_importance / (node_importance.max() + 1e-8)
 
-        # Attention weights from last conv layer
+        # Attention weights and edge index from last conv layer
         edge_attention: list[float] = []
+        last_edge_index = graph.edge_index.tolist()
+        
         if hasattr(model, '_last_attention') and model._last_attention is not None:
             edge_attention = model._last_attention.mean(-1).cpu().numpy().tolist()
+            if hasattr(model, '_last_edge_index') and model._last_edge_index is not None:
+                last_edge_index = model._last_edge_index.cpu().numpy().tolist()
 
-        top_idx = int(np.argmax(probs))
+        probabilities = {EMOTION_LABELS[i]: float(p) for i, p in enumerate(probs)}
+        top_emotion = max(probabilities, key=probabilities.get)
+        raw_top_conf = probabilities[top_emotion]
+
+        from app.utils.calibration import temperature_scale_probs
+        calibrated_probs = temperature_scale_probs(probabilities, temperature=1.4)
+        calibrated_top_emotion = max(calibrated_probs, key=calibrated_probs.get)
+        calibrated_top_conf = calibrated_probs[calibrated_top_emotion]
 
         return GNNPrediction(
-            emotion=EMOTION_LABELS[top_idx],
-            confidence=float(probs[top_idx]),
-            probabilities={EMOTION_LABELS[i]: float(p) for i, p in enumerate(probs)},
+            emotion=calibrated_top_emotion,
+            confidence=calibrated_top_conf,
+            probabilities=calibrated_probs,
+            raw_confidence=raw_top_conf,
+            raw_probabilities=probabilities,
             node_importance=node_importance.tolist(),
             edge_attention=edge_attention,
+            edge_index=last_edge_index,
             model_id=self.model_id,
         )
 

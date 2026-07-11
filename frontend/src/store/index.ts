@@ -113,6 +113,9 @@ interface AnalysisState {
     neutral: number;
     surprise: number;
     anger: number;
+    fear: number;
+    disgust: number;
+    contempt: number;
   }[];
 
   // Alerts
@@ -226,6 +229,9 @@ export const useAnalysisStore = create<AnalysisState>()((set, get) => ({
       neutral: dl.emotion_ensemble.probabilities['neutral'] ?? 0,
       surprise: dl.emotion_ensemble.probabilities['surprise'] ?? 0,
       anger: dl.emotion_ensemble.probabilities['anger'] ?? 0,
+      fear: dl.emotion_ensemble.probabilities['fear'] ?? 0,
+      disgust: dl.emotion_ensemble.probabilities['disgust'] ?? 0,
+      contempt: dl.emotion_ensemble.probabilities['contempt'] ?? 0,
     } : null;
 
     set({

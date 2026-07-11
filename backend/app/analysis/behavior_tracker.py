@@ -15,7 +15,7 @@ All metrics require at least 2 frames to compute meaningful values.
 from __future__ import annotations
 
 import time
-from collections import deque
+from collections import deque, Counter
 
 import numpy as np
 from numpy.typing import NDArray
@@ -55,6 +55,9 @@ class BehaviorTracker:
         # Rolling buffer of landmark arrays for stability computation
         self._landmark_history: deque[NDArray[np.float64]] = deque(maxlen=_STABILITY_WINDOW)
 
+        # Rolling history of raw attention classifications to prevent flickering (majority voting)
+        self._attention_history: deque[AttentionState] = deque(maxlen=15)
+
         # Previous frame state
         self._prev_landmarks: NDArray[np.float64] | None = None
         self._prev_timestamp: float = 0.0
@@ -67,6 +70,7 @@ class BehaviorTracker:
         head_pitch: float,
         yawn_detected: bool,
         blinks_per_minute: float,
+        eye_closure_duration_ms: float = 0.0,
     ) -> BehaviorResult:
         """
         Compute behavioral metrics for the current frame.
@@ -78,6 +82,7 @@ class BehaviorTracker:
             head_pitch: Head pitch angle in degrees
             yawn_detected: Whether yawn was detected this frame
             blinks_per_minute: Rolling blink frequency
+            eye_closure_duration_ms: Current sustained eye closure duration in ms
 
         Returns:
             BehaviorResult with all behavioral metrics
@@ -113,14 +118,19 @@ class BehaviorTracker:
         facial_symmetry = self._compute_symmetry(face_data)
 
         # ── Attention State Classification ────────────────────────────────────
-        attention_state = self._classify_attention(
+        raw_state = self._classify_attention(
             ear=eye_ear,
             yaw=head_yaw,
             pitch=head_pitch,
             yawn_detected=yawn_detected,
             blinks_per_minute=blinks_per_minute,
             landmark_stability=landmark_stability,
+            eye_closure_duration_ms=eye_closure_duration_ms,
         )
+        self._attention_history.append(raw_state)
+
+        # Majority vote (mode) to prevent rapid flickering
+        attention_state = Counter(self._attention_history).most_common(1)[0][0]
 
         # Store for next frame
         self._prev_landmarks = current_lm.copy()
@@ -197,12 +207,13 @@ class BehaviorTracker:
         yawn_detected: bool,
         blinks_per_minute: float,
         landmark_stability: float,
+        eye_closure_duration_ms: float = 0.0,
     ) -> AttentionState:
         """
         Rule-based attention state classification.
 
         Rules (in priority order):
-        1. DROWSY: Low EAR (eye closure) or yawning with high blink rate
+        1. DROWSY: Low EAR (extended eye closure > 1s) or yawning with high blink rate
         2. DISTRACTED: High head rotation (looking away)
         3. FOCUSED: Forward-facing, normal EAR, normal blink rate
         4. ALERT: Forward-facing, above-normal blink rate or jitter
@@ -211,8 +222,9 @@ class BehaviorTracker:
         if landmark_stability < 0.3:
             return AttentionState.UNKNOWN
 
-        # Drowsiness: eye closed or yawning with elevated blink rate
-        if ear < settings.EAR_CLOSURE_THRESHOLD or (yawn_detected and blinks_per_minute > 20):
+        # Drowsiness: extended eye closed (>1.0s) or yawning with elevated blink rate
+        is_drowsy_closure = ear < settings.EAR_CLOSURE_THRESHOLD and eye_closure_duration_ms > 1000.0
+        if is_drowsy_closure or (yawn_detected and blinks_per_minute > 20):
             return AttentionState.DROWSY
 
         # Distracted: significant head rotation (post-calibration offsets)
@@ -232,5 +244,6 @@ class BehaviorTracker:
         self._nose_positions.clear()
         self._nose_timestamps.clear()
         self._landmark_history.clear()
+        self._attention_history.clear()
         self._prev_landmarks = None
         self._prev_timestamp = 0.0

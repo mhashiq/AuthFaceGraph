@@ -35,3 +35,6 @@ __pycache__/
 .idea/
 .vscode/
 .env
+
+# Debug output
+backend/debug_inference/

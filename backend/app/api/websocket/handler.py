@@ -76,7 +76,7 @@ async def save_session_stats(session_id: str) -> None:
     try:
         from app.core.database import AsyncSessionLocal
         from app.models.db_models import AnalysisSession
-        from datetime import datetime, timezone
+        from datetime import datetime, timezone, timedelta
         from sqlalchemy import select
         import uuid
 
@@ -86,17 +86,25 @@ async def save_session_stats(session_id: str) -> None:
             res = await db.execute(stmt)
             session_rec = res.scalar_one_or_none()
 
+            ended_time = datetime.now(timezone.utc)
+            uptime = stats.get("uptime_seconds", 0.0)
+            started_time = ended_time - timedelta(seconds=uptime)
+
             if not session_rec:
                 session_rec = AnalysisSession(
                     session_id=session_id,
                     user_id=uuid.UUID(client.user_id),
                     org_id=uuid.UUID(client.org_id),
+                    started_at=started_time,
                 )
                 db.add(session_rec)
+            else:
+                if not session_rec.started_at:
+                    session_rec.started_at = started_time
 
             # Update fields
             session_rec.status = "completed"
-            session_rec.ended_at = datetime.now(timezone.utc)
+            session_rec.ended_at = ended_time
             session_rec.total_frames = stats["total_frames"]
             session_rec.total_blinks = stats["total_blinks"]
             session_rec.avg_ear = stats["avg_ear"]
