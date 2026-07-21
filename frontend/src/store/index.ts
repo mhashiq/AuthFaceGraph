@@ -126,6 +126,9 @@ interface AnalysisState {
   // System logs
   logs: SystemLogEntry[];
 
+  // Full result history (for analytics)
+  history: FaceAnalysisResult[];
+
   // Computed
   sessionBlinkCount:  number;
   sessionStartTime:   number | null;
@@ -157,6 +160,7 @@ export const useAnalysisStore = create<AnalysisState>()((set, get) => ({
   alertExpirations: {},
   undetectedCount:  0,
   logs:             [],
+  history:          [],
   sessionBlinkCount: 0,
   sessionStartTime:  null,
 
@@ -241,6 +245,9 @@ export const useAnalysisStore = create<AnalysisState>()((set, get) => ({
       activeAlerts: activeAlerts,
       sessionBlinkCount: result.eyes?.blink_count ?? state.sessionBlinkCount,
       sessionStartTime:  state.sessionStartTime ?? now,
+
+      // Append to full history (cap at 500 results)
+      history: [...state.history.slice(-499), smoothedResult],
 
       earHistory: newEarPoint
         ? [...state.earHistory.slice(-CHART_HISTORY_POINTS + 1), newEarPoint]

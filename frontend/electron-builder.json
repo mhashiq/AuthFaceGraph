@@ -1,0 +1,59 @@
+{
+  "appId": "com.authfacegraph.app",
+  "productName": "AuthFaceGraph",
+  "directories": {
+    "output": "dist-mac",
+    "buildResources": "build"
+  },
+  "files": [
+    "dist/**/*",
+    "electron/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "../backend",
+      "to": "backend",
+      "filter": [
+        "**/*",
+        "!**/__pycache__/**",
+        "!**/*.pyc",
+        "!**/.pytest_cache/**",
+        "!**/.venv/**",
+        "!debug_inference/**",
+        "!authbrain.db"
+      ]
+    }
+  ],
+  "mac": {
+    "category": "public.app-category.medical",
+    "target": [
+      {
+        "target": "dmg",
+        "arch": ["arm64"]
+      }
+    ],
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "electron/entitlements.mac.plist",
+    "entitlementsInherit": "electron/entitlements.mac.plist",
+    "extendInfo": {
+      "NSCameraUsageDescription": "AuthBrain requires camera access for real-time facial landmark detection, stress tracking, and bio-authentication.",
+      "NSMicrophoneUsageDescription": "AuthBrain requires microphone access for audio-visual bio-authentication."
+    }
+  },
+  "dmg": {
+    "contents": [
+      {
+        "x": 130,
+        "y": 220
+      },
+      {
+        "x": 410,
+        "y": 220,
+        "type": "link",
+        "path": "/Applications"
+      }
+    ]
+  }
+}

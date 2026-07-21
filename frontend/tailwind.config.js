@@ -4,50 +4,51 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Primary brand palette
+        // AuthFaceGraph brand palette — neon cyan / violet / indigo
         brand: {
-          50:  '#eeffee',
-          100: '#ccffcc',
-          200: '#99ff99',
-          300: '#66ff66',
-          400: '#33ff33',
-          500: '#00ff41',  // Matrix green — primary accent
-          600: '#00cc34',
-          700: '#009927',
-          800: '#00661a',
-          900: '#00330d',
+          50:  '#e0faff',
+          100: '#b0f0ff',
+          200: '#7ae5ff',
+          300: '#3dd9ff',
+          400: '#00d4ff',  // Neon cyan — primary accent
+          500: '#00b8e0',
+          600: '#0090b3',
+          700: '#006b87',
+          800: '#00475a',
+          900: '#00232e',
+        },
+        violet: {
+          300: '#c4b5fd',
+          400: '#a78bfa',
+          500: '#8b5cf6',
+          600: '#7c3aed',
+          700: '#6d28d9',
         },
         // Dark backgrounds
         dark: {
-          950: '#020408',
-          900: '#050a0e',
-          850: '#080f14',
-          800: '#0d1520',
-          750: '#111c28',
-          700: '#162030',
-          600: '#1e2d40',
-          500: '#263550',
+          950: '#010409',
+          900: '#030712',
+          850: '#070d1a',
+          800: '#0e1628',
+          750: '#111c33',
+          700: '#162038',
+          600: '#1d2b4a',
+          500: '#243460',
+          400: '#3a4f70',
+          300: '#5d7399',
         },
         // Status colors
         risk: {
-          critical: '#ff2d55',
-          high:     '#ff6b35',
-          medium:   '#ffd60a',
-          low:      '#34c759',
-        },
-        // Metric indicators
-        metric: {
-          ear:     '#00d4ff',
-          pose:    '#bf5af2',
-          smile:   '#ff9f0a',
-          blink:   '#30d158',
-          fatigue: '#ff453a',
-          focus:   '#64d2ff',
+          critical: '#ef4444',
+          high:     '#f97316',
+          medium:   '#f59e0b',
+          low:      '#10b981',
         },
       },
       fontFamily: {
-        sans:  ['Inter', 'system-ui', 'sans-serif'],
-        mono:  ['JetBrains Mono', 'Fira Code', 'monospace'],
+        sans:    ['Inter', 'system-ui', 'sans-serif'],
+        mono:    ['JetBrains Mono', 'Fira Code', 'monospace'],
+        display: ['Orbitron', 'system-ui', 'sans-serif'],
       },
       animation: {
         'pulse-slow':    'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',

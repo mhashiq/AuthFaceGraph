@@ -38,6 +38,10 @@ if settings.DATABASE_URL.startswith("postgresql"):
         "pool_size": 10,
         "max_overflow": 20,
         "pool_recycle": 3600,
+        "connect_args": {
+            "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
+        },
     })
 
 engine = create_async_engine(

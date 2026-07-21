@@ -47,10 +47,20 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "authbrain_db"
+    DATABASE_URL_OVERRIDE: str | None = Field(default=None, alias="DATABASE_URL")
 
     @computed_field  # type: ignore[misc]
     @property
     def DATABASE_URL(self) -> str:
+        if self.DATABASE_URL_OVERRIDE:
+            url = self.DATABASE_URL_OVERRIDE
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+            elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
+                url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            # Remove pgbouncer=true query parameter which asyncpg dialect doesn't accept
+            url = url.replace("?pgbouncer=true", "").replace("&pgbouncer=true", "")
+            return url
         if self.ENVIRONMENT == "development" and self.POSTGRES_HOST == "localhost":
             return "sqlite+aiosqlite:///authbrain_dev.db"
         return (
@@ -62,6 +72,13 @@ class Settings(BaseSettings):
     @property
     def DATABASE_URL_SYNC(self) -> str:
         """Sync URL used by Alembic migrations."""
+        if self.DATABASE_URL_OVERRIDE:
+            url = self.DATABASE_URL_OVERRIDE
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql+psycopg2://", 1)
+            elif url.startswith("postgresql://") and not url.startswith("postgresql+psycopg2://"):
+                url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+            return url
         if self.ENVIRONMENT == "development" and self.POSTGRES_HOST == "localhost":
             return "sqlite:///authbrain_dev.db"
         return (

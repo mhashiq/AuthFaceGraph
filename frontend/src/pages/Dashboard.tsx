@@ -1,91 +1,143 @@
 /**
  * AuthFaceGraph AI
- * Main Dashboard Page
+ * Main Dashboard Shell — 5-Section Navigation
  *
- * Production-grade real-time analysis dashboard with a world-class
- * enterprise layout resembling Microsoft Build / NVIDIA GTC cockpit tools.
+ * Premium futuristic AI operating system interface with
+ * section-based navigation, smooth transitions, and zero blank screens.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { LeftSidebar } from '../components/dashboard/LeftSidebar';
-import { TopBar } from '../components/dashboard/TopBar';
+import { TopBar }      from '../components/dashboard/TopBar';
 import { PrimaryAIVisualizer } from '../components/webcam/PrimaryAIVisualizer';
-import { RightPanel } from '../components/dashboard/RightPanel';
+import { RightPanel }          from '../components/dashboard/RightPanel';
 import { AnalyticsBottomPanel } from '../components/dashboard/AnalyticsBottomPanel';
 import { ProfileHistoryDrawer } from '../components/dashboard/ProfileHistoryDrawer';
+import { PageTransition }       from '../components/ui';
+import { AnalyticsDashboard }   from './sections/AnalyticsDashboard';
+import { UserManagement }       from './sections/UserManagement';
+import { ActivityMonitoring }   from './sections/ActivityMonitoring';
+import { SettingsPanel }        from './sections/SettingsPanel';
 import { useAnalysisStore, useAuthStore } from '../store';
 
-export const Dashboard: React.FC = () => {
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
-  
-  const latestResult = useAnalysisStore((s) => s.latestResult);
-  const clearAuth = useAuthStore((s) => s.clearAuth);
+type Section = 'dashboard' | 'analytics' | 'users' | 'activity' | 'settings';
 
-  const dl = latestResult?.deep_learning || undefined;
-  const expert = latestResult?.expert_system || undefined;
+export const Dashboard: React.FC = () => {
+  const [activeSection, setActiveSection] = useState<Section>('dashboard');
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
+
+  const latestResult = useAnalysisStore(s => s.latestResult);
+  const clearAuth    = useAuthStore(s => s.clearAuth);
+
+  const dl       = latestResult?.deep_learning || undefined;
+  const expert   = latestResult?.expert_system || undefined;
   const behavior = latestResult?.behavior || undefined;
 
-  const handleLogout = () => {
-    clearAuth();
-    window.location.href = '/';
-  };
+  const handleLogout = useCallback(() => {
+    setIsExiting(true);
+    setTimeout(() => {
+      clearAuth();
+      window.location.href = '/';
+    }, 350);
+  }, [clearAuth]);
+
+  const handleSectionChange = useCallback((section: Section) => {
+    setActiveSection(section);
+  }, []);
 
   return (
-    <div className="min-h-screen bg-dark-950 text-white flex flex-col p-4 lg:p-6" style={{ backgroundImage: 'var(--tw-bg-grid-pattern)' }}>
-      {/* 3-Column Enterprise Dashboard Grid Layout */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5 max-w-[1700px] mx-auto w-full">
-        
-        {/* ── COLUMN 1: LEFT SIDEBAR (Span 3) ─────────────────────────────────── */}
-        <div className="lg:col-span-3 flex flex-col">
-          <LeftSidebar 
-            onProfileClick={() => setIsProfileOpen(true)}
-            onLogout={handleLogout}
-          />
-        </div>
+    <div
+      className="min-h-screen flex gpu-accelerated"
+      style={{
+        background: 'linear-gradient(135deg, #010409 0%, #030712 50%, #070d1a 100%)',
+        opacity: isExiting ? 0 : 1,
+        transition: 'opacity 0.35s ease',
+      }}
+    >
+      {/* Ambient background effects */}
+      <div className="fixed inset-0 pointer-events-none z-0">
+        {/* Grid */}
+        <div className="absolute inset-0 bg-grid opacity-40" />
+        {/* Ambient glow top-left */}
+        <div className="absolute top-0 left-1/4 w-[600px] h-[400px] opacity-[0.04]"
+          style={{ background: 'radial-gradient(ellipse, #7c3aed, transparent 70%)', filter: 'blur(40px)' }} />
+        {/* Ambient glow bottom-right */}
+        <div className="absolute bottom-0 right-1/4 w-[500px] h-[300px] opacity-[0.04]"
+          style={{ background: 'radial-gradient(ellipse, #00d4ff, transparent 70%)', filter: 'blur(40px)' }} />
+      </div>
 
-        {/* ── COLUMN 2: CENTER PANEL - MAIN COCKPIT (Span 6) ────────────────── */}
-        <div className="lg:col-span-6 flex flex-col gap-5">
-          {/* Top telemetry state bar */}
-          <TopBar />
+      {/* ── SIDEBAR ─────────────────────────────────────────────── */}
+      <div className="relative z-10 w-64 flex-shrink-0 p-4 flex flex-col">
+        <LeftSidebar
+          activeSection={activeSection}
+          onSectionChange={handleSectionChange}
+          onProfileClick={() => setIsProfileOpen(true)}
+          onLogout={handleLogout}
+        />
+      </div>
 
-          {/* Primary 3D projection visualizer visual feed */}
-          <PrimaryAIVisualizer />
+      {/* ── MAIN CONTENT AREA ──────────────────────────────────── */}
+      <div className="flex-1 flex flex-col min-w-0 p-4 pl-2 gap-4 relative z-10 overflow-hidden">
+        {/* TopBar — always visible */}
+        <TopBar activeSection={activeSection} />
 
-          {/* Professional Tabbed bottom analytics panel */}
-          <AnalyticsBottomPanel 
-            dl={dl}
-            expert={expert}
-            behavior={behavior}
-          />
-        </div>
+        {/* Content scroll container */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden pr-1 -mr-1">
 
-        {/* ── COLUMN 3: RIGHT PANEL - AI INSIGHT CARDS (Span 3) ─────────────── */}
-        <div className="lg:col-span-3 flex flex-col">
-          <RightPanel 
-            dl={dl}
-            expert={expert}
-            behavior={behavior}
-          />
+          {/* ── DASHBOARD SECTION ─────────────────────────────── */}
+          {activeSection === 'dashboard' && (
+            <PageTransition id="dashboard">
+              <div className="flex gap-4 h-full">
+                {/* Center: AI Visualizer + Analytics */}
+                <div className="flex-1 flex flex-col gap-4 min-w-0">
+                  <PrimaryAIVisualizer />
+                  <AnalyticsBottomPanel dl={dl} expert={expert} behavior={behavior} />
+                </div>
+
+                {/* Right Panel */}
+                <div className="w-[340px] flex-shrink-0">
+                  <RightPanel dl={dl} expert={expert} behavior={behavior} />
+                </div>
+              </div>
+            </PageTransition>
+          )}
+
+          {/* ── ANALYTICS SECTION ─────────────────────────────── */}
+          {activeSection === 'analytics' && (
+            <PageTransition id="analytics">
+              <AnalyticsDashboard />
+            </PageTransition>
+          )}
+
+          {/* ── USER MANAGEMENT SECTION ───────────────────────── */}
+          {activeSection === 'users' && (
+            <PageTransition id="users">
+              <UserManagement />
+            </PageTransition>
+          )}
+
+          {/* ── ACTIVITY & MONITORING SECTION ─────────────────── */}
+          {activeSection === 'activity' && (
+            <PageTransition id="activity">
+              <ActivityMonitoring />
+            </PageTransition>
+          )}
+
+          {/* ── SETTINGS SECTION ──────────────────────────────── */}
+          {activeSection === 'settings' && (
+            <PageTransition id="settings">
+              <SettingsPanel />
+            </PageTransition>
+          )}
         </div>
       </div>
 
-      {/* Profile & History Drawer Overlay */}
+      {/* Profile History Drawer */}
       <ProfileHistoryDrawer
         isOpen={isProfileOpen}
         onClose={() => setIsProfileOpen(false)}
       />
-
-      <footer className="mt-8 mb-2 text-center text-[10px] font-mono text-dark-500 flex items-center justify-center gap-1.5 border-t border-dark-800/40 pt-4">
-        <span className="text-white font-semibold">© 2026</span>
-        <span>Developed and Researched by</span>
-        <a href="https://www.authbrain.io" target="_blank" rel="noopener noreferrer" className="text-white font-bold hover:underline">
-          AuthBrain
-        </a>
-        <span>·</span>
-        <a href="https://www.authbrain.io" target="_blank" rel="noopener noreferrer" className="text-dark-400 hover:text-white transition-colors hover:underline">
-          www.authbrain.io
-        </a>
-      </footer>
     </div>
   );
 };

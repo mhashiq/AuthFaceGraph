@@ -1,18 +1,15 @@
 /**
- * AuthBrain AI Face Analysis Engine
- * Consent + Login Page
- *
- * Presents the login form and explicit consent workflow.
- * Users must log in AND grant consent before analysis begins.
+ * AuthFaceGraph — Premium Consent & Login Page
+ * Cinematic dark glassmorphism login with animated background
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Brain, Lock, Eye, EyeOff, Shield, CheckCircle } from 'lucide-react';
+import { Eye, EyeOff, Shield, CheckCircle, ChevronRight, Zap, Lock } from 'lucide-react';
 import axios from 'axios';
 import { useAuthStore, useAnalysisStore } from '../store';
 import type { LoginResponse, ConsentResponse } from '../types/analysis';
-import clsx from 'clsx';
+import { NeonButton } from '../components/ui';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -21,7 +18,7 @@ export const ConsentPage: React.FC = () => {
   const { setAuth } = useAuthStore();
   const { setConsentGranted, setSessionId, addLog } = useAnalysisStore();
 
-  const [step, setStep]   = useState<'login' | 'consent'>('login');
+  const [step, setStep] = useState<'login' | 'consent'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [orgId, setOrgId]  = useState('');
@@ -29,9 +26,97 @@ export const ConsentPage: React.FC = () => {
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
   const [consentChecked, setConsentChecked] = useState(false);
-  const [accessToken, setAccessToken]       = useState('');
+  const [accessToken, setAccessToken] = useState('');
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // ── Step 1: Login ────────────────────────────────────────────────────────
+  // Animated background canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const resize = () => {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    resize();
+    window.addEventListener('resize', resize);
+
+    const particles: Array<{x:number;y:number;vx:number;vy:number;size:number;opacity:number;color:string}> = [];
+    const COLORS = ['#00d4ff', '#7c3aed', '#4f46e5', '#2563eb'];
+    for (let i = 0; i < 80; i++) {
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        size: Math.random() * 2 + 0.5,
+        opacity: Math.random() * 0.5 + 0.1,
+        color: COLORS[Math.floor(Math.random() * COLORS.length)],
+      });
+    }
+
+    let raf = 0;
+    const draw = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Background
+      const grad = ctx.createRadialGradient(canvas.width/2, canvas.height/2, 0, canvas.width/2, canvas.height/2, canvas.width * 0.8);
+      grad.addColorStop(0, '#0a0f1e');
+      grad.addColorStop(1, '#010409');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Grid
+      ctx.strokeStyle = 'rgba(0,212,255,0.04)';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < canvas.width; x += 40) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += 40) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+      }
+
+      // Particles + connections
+      particles.forEach(p => {
+        p.x += p.vx; p.y += p.vy;
+        if (p.x < 0) p.x = canvas.width;
+        if (p.x > canvas.width) p.x = 0;
+        if (p.y < 0) p.y = canvas.height;
+        if (p.y > canvas.height) p.y = 0;
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = p.color + Math.floor(p.opacity * 255).toString(16).padStart(2,'0');
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = p.color;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      });
+
+      // Draw connections
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < 120) {
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.strokeStyle = `rgba(79,70,229,${(1 - dist/120) * 0.12})`;
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+          }
+        }
+      }
+
+      raf = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', resize); };
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,212 +133,260 @@ export const ConsentPage: React.FC = () => {
       setStep('consent');
       addLog('info', `Logged in as ${res.data.email}`, 'auth');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Login failed. Check your credentials.');
+      setError(err.response?.data?.detail || 'Authentication failed. Check credentials.');
     } finally {
       setLoading(false);
     }
   };
-
-  // ── Step 2: Consent ──────────────────────────────────────────────────────
 
   const handleConsent = async () => {
     if (!consentChecked) return;
     setLoading(true);
     setError(null);
     try {
-      const sessionId = crypto.randomUUID();
       const res = await axios.post<ConsentResponse>(
         `${API_BASE}/api/consent/`,
-        {
-          session_id: sessionId,
-          consent_granted: true,
-          consent_text_version: '1.0',
-          user_agent: navigator.userAgent,
-        },
-        { headers: { Authorization: `Bearer ${accessToken}` } }
+        { consent_granted: true, purpose: 'biometric_analysis' },
+        { headers: { Authorization: `Bearer ${accessToken}` } },
       );
-      setSessionId(res.data.session_id);
       setConsentGranted(true);
-      addLog('info', 'Consent recorded. Starting analysis session.', 'consent');
-      navigate('/dashboard');
+      setSessionId(res.data.session_id);
+      addLog('info', 'Consent granted — analysis session started', 'consent');
+      navigate('/dashboard', { replace: true });
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Consent submission failed.');
+      setError(err.response?.data?.detail || 'Consent registration failed.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-dark-950 flex items-center justify-center p-4"
-         style={{ background: 'radial-gradient(ellipse at 50% 30%, rgba(0,255,65,0.06) 0%, #020408 60%)' }}>
+    <div className="relative min-h-screen flex items-center justify-center overflow-hidden gpu-accelerated">
+      {/* Animated BG canvas */}
+      <canvas ref={canvasRef} className="absolute inset-0 z-0" />
 
-      {/* Card */}
-      <div className="w-full max-w-md">
+      {/* Ambient orbs */}
+      <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full opacity-10 animate-glow-pulse"
+        style={{ background: 'radial-gradient(circle, #7c3aed, transparent 70%)', filter: 'blur(60px)' }} />
+      <div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full opacity-10 animate-glow-pulse"
+        style={{ background: 'radial-gradient(circle, #00d4ff, transparent 70%)', filter: 'blur(60px)', animationDelay: '1s' }} />
 
-        {/* Logo */}
-        <div className="flex flex-col items-center mb-8">
-          <h1 className="text-3xl font-extrabold text-white tracking-tight uppercase">AuthFaceGraph</h1>
-          <p className="text-dark-400 text-sm font-mono mt-1">Face Analysis Engine</p>
+      {/* Brand top-left */}
+      <div className="absolute top-6 left-8 z-10 flex items-center gap-2.5">
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+          style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)', boxShadow: '0 0 16px rgba(139,92,246,0.4)' }}>
+          <Shield size={16} className="text-white" />
         </div>
+        <span className="font-display font-bold text-sm tracking-widest text-gradient-brand uppercase">
+          AuthFaceGraph
+        </span>
+      </div>
 
-        {/* Step indicator */}
-        <div className="flex items-center gap-2 mb-6 justify-center">
-          {['login', 'consent'].map((s, i) => (
-            <React.Fragment key={s}>
-              <div className={clsx(
-                'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold font-mono border transition-all',
-                step === s ? 'bg-brand-500 border-brand-500 text-dark-950' :
-                i === 0 && step === 'consent' ? 'bg-brand-500/20 border-brand-500/40 text-brand-500' :
-                'bg-dark-800 border-dark-600 text-dark-500'
-              )}>
-                {i === 0 && step === 'consent' ? <CheckCircle size={12} /> : i + 1}
+      {/* System status top-right */}
+      <div className="absolute top-6 right-8 z-10 flex items-center gap-1.5">
+        <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" style={{ boxShadow: '0 0 6px #10b981' }} />
+        <span className="font-mono text-[10px] text-emerald-400/70 uppercase tracking-widest">Systems Online</span>
+      </div>
+
+      {/* ── MAIN CARD ──────────────────────────────────────────────── */}
+      <div
+        className="relative z-10 w-full max-w-md mx-4 animate-card-enter"
+        style={{ animationDelay: '0.1s' }}
+      >
+        {/* Gradient border wrapper */}
+        <div className="gradient-border p-[1px] rounded-2xl"
+          style={{ background: 'linear-gradient(135deg, rgba(0,212,255,0.4), rgba(79,70,229,0.4), rgba(139,92,246,0.4))' }}>
+          <div className="rounded-2xl p-8"
+            style={{ background: 'rgba(7,13,26,0.92)', backdropFilter: 'blur(24px)' }}>
+
+            {/* Header */}
+            <div className="flex items-center gap-3 mb-8">
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center"
+                style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)', boxShadow: '0 0 20px rgba(139,92,246,0.5)' }}>
+                {step === 'login' ? <Lock size={20} className="text-white" /> : <Shield size={20} className="text-white" />}
               </div>
-              {i < 1 && <div className={clsx('h-px w-12', step === 'consent' ? 'bg-brand-500/40' : 'bg-dark-700')} />}
-            </React.Fragment>
-          ))}
-        </div>
-
-        {/* Login Form */}
-        {step === 'login' && (
-          <form onSubmit={handleLogin} className="bg-dark-800/60 border border-dark-600/50 rounded-2xl p-6 space-y-4 backdrop-blur-sm">
-            <h2 className="text-lg font-semibold text-white mb-2">Sign in to your account</h2>
-
-            <div>
-              <label className="block text-xs font-mono text-dark-400 mb-1.5">Organization ID (optional)</label>
-              <input
-                type="text"
-                value={orgId}
-                onChange={e => setOrgId(e.target.value)}
-                placeholder="org-slug or leave blank"
-                className="w-full bg-dark-900 border border-dark-600 rounded-lg px-3 py-2.5 text-sm text-white
-                           placeholder:text-dark-600 focus:outline-none focus:border-brand-500/60 transition-colors font-mono"
-              />
+              <div>
+                <h1 className="text-xl font-bold text-white font-display tracking-wide">
+                  {step === 'login' ? 'Secure Access' : 'Biometric Consent'}
+                </h1>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  {step === 'login' ? 'AuthFaceGraph AI Platform' : 'Review & accept data processing terms'}
+                </p>
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-mono text-dark-400 mb-1.5">Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                placeholder="your@email.com"
-                className="w-full bg-dark-900 border border-dark-600 rounded-lg px-3 py-2.5 text-sm text-white
-                           placeholder:text-dark-600 focus:outline-none focus:border-brand-500/60 transition-colors"
-              />
+            {/* Step indicator */}
+            <div className="flex items-center gap-2 mb-7">
+              {['login', 'consent'].map((s, i) => (
+                <React.Fragment key={s}>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold font-mono"
+                      style={{
+                        background: step === s || (s === 'login' && step === 'consent')
+                          ? 'linear-gradient(135deg,#4f46e5,#7c3aed)'
+                          : 'rgba(79,70,229,0.1)',
+                        color: step === s || (s === 'login' && step === 'consent') ? 'white' : '#5d7399',
+                        border: `1px solid ${step === s ? 'rgba(139,92,246,0.6)' : 'rgba(79,70,229,0.2)'}`,
+                      }}>
+                      {s === 'login' && step === 'consent' ? '✓' : i + 1}
+                    </div>
+                    <span className="font-mono text-[10px] uppercase tracking-wider"
+                      style={{ color: step === s ? '#c9d4f0' : '#3a4f70' }}>
+                      {s === 'login' ? 'Authenticate' : 'Consent'}
+                    </span>
+                  </div>
+                  {i < 1 && <ChevronRight size={12} className="text-slate-600" />}
+                </React.Fragment>
+              ))}
             </div>
 
-            <div>
-              <label className="block text-xs font-mono text-dark-400 mb-1.5">Password</label>
-              <div className="relative">
-                <input
-                  type={showPass ? 'text' : 'password'}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  required
-                  placeholder="••••••••"
-                  className="w-full bg-dark-900 border border-dark-600 rounded-lg px-3 py-2.5 pr-10 text-sm text-white
-                             placeholder:text-dark-600 focus:outline-none focus:border-brand-500/60 transition-colors"
-                />
-                <button type="button" onClick={() => setShowPass(!showPass)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-dark-500 hover:text-dark-300">
-                  {showPass ? <EyeOff size={14} /> : <Eye size={14} />}
+            {/* Error message */}
+            {error && (
+              <div className="mb-5 px-4 py-3 rounded-xl font-mono text-xs text-red-400 border animate-card-enter"
+                style={{ background: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.3)' }}>
+                ⚠ {error}
+              </div>
+            )}
+
+            {/* ── LOGIN FORM ── */}
+            {step === 'login' && (
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="font-mono text-[10px] uppercase tracking-widest text-slate-400">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    required
+                    placeholder="agent@authfacegraph.ai"
+                    className="neon-input w-full px-4 py-3 rounded-xl text-sm font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="font-mono text-[10px] uppercase tracking-widest text-slate-400">
+                    Passkey
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPass ? 'text' : 'password'}
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      required
+                      placeholder="••••••••••"
+                      className="neon-input w-full px-4 py-3 pr-11 rounded-xl text-sm font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPass(!showPass)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-cyan-400 transition-colors"
+                    >
+                      {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="font-mono text-[10px] uppercase tracking-widest text-slate-400">
+                    Organization ID <span className="text-slate-600">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={orgId}
+                    onChange={e => setOrgId(e.target.value)}
+                    placeholder="ORG-XXXXXXXXXX"
+                    className="neon-input w-full px-4 py-3 rounded-xl text-sm font-mono"
+                  />
+                </div>
+
+                <div className="pt-2">
+                  <NeonButton type="submit" loading={loading} fullWidth size="lg" variant="primary">
+                    <Zap size={16} />
+                    <span>Authenticate & Enter</span>
+                  </NeonButton>
+                </div>
+
+                <p className="text-center font-mono text-[10px] text-slate-500 pt-1">
+                  AES-256 encrypted · Zero-knowledge auth · GDPR compliant
+                </p>
+              </form>
+            )}
+
+            {/* ── CONSENT FORM ── */}
+            {step === 'consent' && (
+              <div className="space-y-5">
+                <div className="rounded-xl p-4 space-y-3 text-[11px]"
+                  style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(79,70,229,0.15)' }}>
+                  <h3 className="font-mono text-[10px] uppercase tracking-widest text-violet-400 mb-3">
+                    Biometric Data Processing Agreement
+                  </h3>
+                  {[
+                    { icon: '🔬', text: 'Real-time facial landmark & emotion analysis via computer vision' },
+                    { icon: '🧠', text: 'Deep learning inference (GNN, transformer ensembles) on facial data' },
+                    { icon: '🔐', text: 'Session data encrypted at rest and in transit (AES-256 / TLS 1.3)' },
+                    { icon: '⏱', text: 'Data retained only for your session — auto-purged on logout' },
+                    { icon: '🛑', text: 'You may withdraw consent at any time by ending the session' },
+                  ].map((item, i) => (
+                    <div key={i} className="flex items-start gap-2.5 text-slate-300">
+                      <span className="text-sm mt-0.5">{item.icon}</span>
+                      <span>{item.text}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <label className="flex items-start gap-3 cursor-pointer group">
+                  <div className="relative mt-0.5 flex-shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={consentChecked}
+                      onChange={e => setConsentChecked(e.target.checked)}
+                      className="sr-only"
+                    />
+                    <div className="w-5 h-5 rounded-md flex items-center justify-center transition-all duration-200"
+                      style={{
+                        background: consentChecked ? 'linear-gradient(135deg,#4f46e5,#7c3aed)' : 'rgba(10,16,32,0.8)',
+                        border: `1px solid ${consentChecked ? '#7c3aed' : 'rgba(79,70,229,0.3)'}`,
+                        boxShadow: consentChecked ? '0 0 12px rgba(139,92,246,0.4)' : 'none',
+                      }}>
+                      {consentChecked && <CheckCircle size={13} className="text-white" />}
+                    </div>
+                  </div>
+                  <span className="text-xs text-slate-300 leading-relaxed group-hover:text-white transition-colors">
+                    I understand and freely consent to biometric analysis of my facial data for the
+                    purposes described above. I confirm I am aged 18 or over.
+                  </span>
+                </label>
+
+                <NeonButton
+                  onClick={handleConsent}
+                  disabled={!consentChecked}
+                  loading={loading}
+                  fullWidth
+                  size="lg"
+                  variant="primary"
+                >
+                  <Shield size={16} />
+                  <span>Grant Access & Begin Session</span>
+                </NeonButton>
+
+                <button
+                  onClick={() => setStep('login')}
+                  className="w-full text-center font-mono text-[10px] text-slate-500 hover:text-cyan-400 transition-colors py-1"
+                >
+                  ← Back to authentication
                 </button>
               </div>
-            </div>
-
-            {error && (
-              <p className="text-risk-critical text-xs font-mono bg-risk-critical/10 border border-risk-critical/30 rounded-lg px-3 py-2">
-                {error}
-              </p>
             )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-brand-500 hover:bg-brand-400 disabled:opacity-50 text-dark-950 font-bold py-2.5 rounded-lg
-                         transition-all shadow-[0_0_20px_rgba(0,255,65,0.3)] hover:shadow-[0_0_30px_rgba(0,255,65,0.5)]"
-            >
-              {loading ? 'Signing in…' : 'Sign In →'}
-            </button>
-          </form>
-        )}
-
-        {/* Consent Form */}
-        {step === 'consent' && (
-          <div className="bg-dark-800/60 border border-dark-600/50 rounded-2xl p-6 space-y-5 backdrop-blur-sm">
-            <div className="flex items-center gap-3">
-              <Shield size={20} className="text-brand-500 flex-shrink-0" />
-              <h2 className="text-lg font-semibold text-white">Camera & AI Analysis Consent</h2>
-            </div>
-
-            <div className="bg-dark-900/60 border border-dark-700/50 rounded-xl p-4 space-y-3 text-xs font-mono text-dark-300 leading-relaxed">
-              <p>By proceeding, you consent to:</p>
-              <ul className="space-y-1.5 list-none">
-                {[
-                  'Your webcam being accessed for real-time facial analysis',
-                  'Facial geometry metrics being extracted (not biometric data)',
-                  'Session summaries being stored (not video or images)',
-                  'AI analysis of attention, fatigue, and behavioral patterns',
-                ].map((item, i) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <CheckCircle size={12} className="text-brand-500 mt-0.5 flex-shrink-0" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-              <p className="text-dark-500 text-[10px]">
-                This is NOT facial recognition. No biometric identifiers are stored.
-                You may revoke consent at any time.
-              </p>
-            </div>
-
-            <label className="flex items-start gap-3 cursor-pointer group">
-              <input
-                type="checkbox"
-                checked={consentChecked}
-                onChange={e => setConsentChecked(e.target.checked)}
-                className="mt-0.5 accent-brand-500 w-4 h-4"
-              />
-              <span className="text-sm text-dark-300 group-hover:text-white transition-colors">
-                I have read and explicitly consent to the above analysis conditions.
-              </span>
-            </label>
-
-            {error && (
-              <p className="text-risk-critical text-xs font-mono bg-risk-critical/10 border border-risk-critical/30 rounded-lg px-3 py-2">
-                {error}
-              </p>
-            )}
-
-            <div className="flex gap-3">
-              <button onClick={() => setStep('login')}
-                      className="flex-1 border border-dark-600 text-dark-400 hover:text-white py-2.5 rounded-lg text-sm transition-colors">
-                Back
-              </button>
-              <button
-                onClick={handleConsent}
-                disabled={!consentChecked || loading}
-                className="flex-1 bg-brand-500 hover:bg-brand-400 disabled:opacity-40 text-dark-950 font-bold py-2.5 rounded-lg
-                           text-sm transition-all shadow-[0_0_20px_rgba(0,255,65,0.3)]"
-              >
-                {loading ? 'Recording…' : 'Consent & Start'}
-              </button>
-            </div>
           </div>
-        )}
+        </div>
       </div>
-      <footer className="absolute bottom-6 left-0 right-0 text-center text-[10px] font-mono text-dark-500 flex items-center justify-center gap-1.5">
-        <span className="text-white font-semibold">© 2026</span>
-        <span>Developed and Researched by</span>
-        <a href="https://www.authbrain.io" target="_blank" rel="noopener noreferrer" className="text-white font-bold hover:underline">
-          AuthBrain
-        </a>
-        <span>·</span>
-        <a href="https://www.authbrain.io" target="_blank" rel="noopener noreferrer" className="text-dark-400 hover:text-white transition-colors hover:underline">
-          www.authbrain.io
-        </a>
-      </footer>
+
+      {/* Bottom branding */}
+      <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 font-mono text-[9px] text-slate-600 tracking-widest text-center">
+        AUTHFACEGRAPH AI PLATFORM · SECURE BIOMETRIC INTELLIGENCE · {new Date().getFullYear()}
+      </div>
     </div>
   );
 };

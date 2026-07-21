@@ -18,6 +18,8 @@ help:
 	@echo ""
 	@echo "  make setup       Install all dependencies (backend + frontend)"
 	@echo "  make dev         Start backend + frontend in dev mode"
+	@echo "  make mac         Start macOS Desktop Application"
+	@echo "  make mac-build   Package native macOS Desktop App (.app / .dmg)"
 	@echo "  make backend     Start FastAPI backend only"
 	@echo "  make frontend    Start React frontend only"
 	@echo "  make test        Run all backend tests"
@@ -71,6 +73,14 @@ models:
 dev:
 	@echo "→ Starting backend + frontend..."
 	@$(MAKE) -j2 backend frontend
+
+mac:
+	@echo "→ Starting macOS Desktop Application..."
+	./start.sh --mac
+
+mac-build:
+	@echo "→ Building macOS Desktop Package (.app / .dmg)..."
+	cd frontend && npm run build:mac
 
 backend:
 	@echo "→ Starting FastAPI backend on :8000..."
