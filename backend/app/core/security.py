@@ -87,10 +87,10 @@ class RegisterRequest(BaseModel):
 
 class FaceEnrollmentRequest(BaseModel):
     user_id: str | None = None
-    frontal_embedding: list[float]
-    left_embedding: list[float]
-    right_embedding: list[float]
-    upward_embedding: list[float]
+    frontal_image: str | list[float] | list[dict] | dict
+    left_image: str | list[float] | list[dict] | dict
+    right_image: str | list[float] | list[dict] | dict
+    upward_image: str | list[float] | list[dict] | dict
 
 
 class LoginResponse(BaseModel):
