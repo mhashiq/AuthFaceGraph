@@ -117,6 +117,13 @@ class IdentityVerifier:
             import cv2
             h, w = frame.shape[:2]
             eye_center = (float((l_eye[0] + r_eye[0]) * 0.5 * w), float((l_eye[1] + r_eye[1]) * 0.5 * h))
+            angle_deg = float(np.degrees(angle_rad))
+            M = cv2.getRotationMatrix2D(eye_center, angle_deg, scale=1.0)
+            aligned = cv2.warpAffine(frame, M, (w, h), flags=cv2.INTER_CUBIC)
+            return aligned, round(quality_score, 4)
+
+        return None, round(quality_score, 4)
+
     def calculate_embedding_quality_score(
         self,
         landmarks: List[Dict[str, float]],
