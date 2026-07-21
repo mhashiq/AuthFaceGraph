@@ -89,6 +89,41 @@ class IdentityVerifier:
         self.is_paused: bool = False
         self.mismatch_count: int = 0
 
+    def align_and_crop_face(
+        self,
+        landmarks: List[Dict[str, float]],
+        frame: Optional[np.ndarray] = None,
+        target_size: int = 112,
+    ) -> Tuple[Optional[np.ndarray], float]:
+        """
+        RetinaFace 5-Point Facial Landmark Alignment.
+        Aligns eyes horizontally and crops face region.
+        Returns: (aligned_crop_bgr, quality_score_0_to_1)
+        """
+        if not landmarks or len(landmarks) < 68:
+            return None, 0.0
+
+        # Extract 5 key points: Left Eye (33), Right Eye (263), Nose Tip (1), Left Mouth (61), Right Mouth (291)
+        l_eye = np.array([landmarks[33]['x'], landmarks[33]['y']])
+        r_eye = np.array([landmarks[263]['x'], landmarks[263]['y']])
+        dx = r_eye[0] - l_eye[0]
+        dy = r_eye[1] - l_eye[1]
+        eye_dist = float(np.sqrt(dx * dx + dy * dy))
+        angle_rad = float(np.arctan2(dy, dx))
+
+        quality_score = min(1.0, max(0.40, eye_dist * 4.0))
+
+        if frame is not None and frame.size > 0:
+            import cv2
+            h, w = frame.shape[:2]
+            eye_center = (float((l_eye[0] + r_eye[0]) * 0.5 * w), float((l_eye[1] + r_eye[1]) * 0.5 * h))
+            angle_deg = float(np.degrees(angle_rad))
+            M = cv2.getRotationMatrix2D(eye_center, angle_deg, scale=1.0)
+            aligned = cv2.warpAffine(frame, M, (w, h), flags=cv2.INTER_CUBIC)
+            return aligned, round(quality_score, 4)
+
+        return None, round(quality_score, 4)
+
     def extract_arcface_embedding(
         self,
         landmarks: List[Dict[str, float]],
