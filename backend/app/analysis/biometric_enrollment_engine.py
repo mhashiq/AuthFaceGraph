@@ -33,8 +33,8 @@ class BiometricInferenceMetrics(BaseModel):
 
 
 class BiometricStateResponse(BaseModel):
-    status: str  # "REJECT" | "GUIDANCE" | "STABILITY_LOCK" | "SUCCESS" | "ERROR"
-    state: str   # "SEARCHING" | "QUALITY_AND_POSE_CHECK" | "LIVENESS_CHECK" | "STABILITY_LOCK" | "POST_CAPTURE_VERIFICATION" | "ENROLLMENT_COMPLETE"
+    status: str  # "WARMUP" | "REJECT" | "GUIDANCE" | "STABILITY_LOCK" | "SUCCESS" | "ERROR"
+    state: str   # "CAMERA_WARMUP" | "SEARCHING" | "QUALITY_AND_POSE_CHECK" | "LIVENESS_CHECK" | "STABILITY_LOCK" | "POST_CAPTURE_VERIFICATION" | "ENROLLMENT_COMPLETE"
     message: str
     metrics: Optional[Dict[str, Any]] = None
     embedding: Optional[List[float]] = None
@@ -45,11 +45,19 @@ class BiometricEnrollmentEngine:
     """
     Production Biometric State Machine Engine.
     Processes live frame pixels and facial landmarks to enforce multi-stage security rules.
+    Includes CAMERA_WARMUP hardware auto-exposure settling & 5-frame lighting debouncing.
     """
 
-    def __init__(self, liveness_threshold: float = 0.92, sharpness_threshold: float = 100.0):
+    def __init__(self, liveness_threshold: float = 0.92, sharpness_threshold: float = 100.0, warmup_frames: int = 20):
         self.liveness_threshold = liveness_threshold
         self.sharpness_threshold = sharpness_threshold
+        self.warmup_frames = warmup_frames
+        self.frame_count = 0
+        self.consecutive_dark_frames = 0
+
+    def reset_warmup(self):
+        self.frame_count = 0
+        self.consecutive_dark_frames = 0
 
     def compute_inference_metrics(
         self,
@@ -76,7 +84,7 @@ class BiometricEnrollmentEngine:
             # 1. OpenCV Laplacian Sharpness Variance
             sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
-            # 2. Exposure Mean Brightness
+            # 2. Exposure Mean Brightness (Luminance)
             brightness = float(np.mean(gray))
 
             bbox = [int(w * 0.2), int(h * 0.2), int(w * 0.8), int(h * 0.8)]
@@ -128,7 +136,18 @@ class BiometricEnrollmentEngine:
     def evaluate_state_machine(self, metrics: BiometricInferenceMetrics) -> BiometricStateResponse:
         """
         Evaluate multi-stage state machine logic rules.
+        Includes CAMERA_WARMUP state and 5-frame consecutive luminance debouncing.
         """
+        self.frame_count += 1
+
+        # STATE 0: CAMERA_WARMUP (First 20 frames / 750ms)
+        if self.frame_count <= self.warmup_frames:
+            return BiometricStateResponse(
+                status="WARMUP",
+                state="CAMERA_WARMUP",
+                message="Initializing camera...",
+            )
+
         # STATE 1: SEARCHING
         if metrics.num_faces_detected == 0:
             return BiometricStateResponse(
@@ -153,6 +172,14 @@ class BiometricEnrollmentEngine:
         pose = metrics.pose_degrees
         qual = metrics.quality_metrics
 
+        # 5-Frame Consecutive Luminance Debouncing Logic
+        if qual.exposure_mean_brightness < 40.0 or qual.exposure_mean_brightness > 220.0:
+            self.consecutive_dark_frames += 1
+            if self.consecutive_dark_frames >= 5:
+                return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Bad lighting. Move to better light.")
+        else:
+            self.consecutive_dark_frames = 0
+
         if pose.yaw < -10.0:
             return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Turn head slightly right.")
         if pose.yaw > 10.0:
@@ -161,12 +188,8 @@ class BiometricEnrollmentEngine:
             return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Raise your head.")
         if pose.pitch > 10.0:
             return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Lower your head.")
-        if abs(pose.roll) > 10.0:
-            return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Keep your head straight.")
         if qual.sharpness_laplacian < self.sharpness_threshold:
             return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Image too blurry. Hold still.")
-        if qual.exposure_mean_brightness < 40.0 or qual.exposure_mean_brightness > 220.0:
-            return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Bad lighting. Move to better light.")
 
         # STATE 3: LIVENESS_CHECK
         if metrics.liveness_score < self.liveness_threshold:

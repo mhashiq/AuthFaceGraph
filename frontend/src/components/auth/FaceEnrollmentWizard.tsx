@@ -13,6 +13,7 @@ import { useAuthStore } from '../../store';
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 type BiometricState = 
+  | 'CAMERA_WARMUP'
   | 'SEARCHING'
   | 'QUALITY_AND_POSE_CHECK'
   | 'LIVENESS_CHECK'
@@ -37,9 +38,9 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // State Machine Engine variables
-  const [currentState, setCurrentState] = useState<BiometricState>('SEARCHING');
-  const [statusType, setStatusType]     = useState<'REJECT' | 'GUIDANCE' | 'STABILITY_LOCK' | 'SUCCESS'>('REJECT');
-  const [guidanceMessage, setGuidanceMessage] = useState('No face detected. Please step into frame.');
+  const [currentState, setCurrentState] = useState<BiometricState>('CAMERA_WARMUP');
+  const [statusType, setStatusType]     = useState<'WARMUP' | 'REJECT' | 'GUIDANCE' | 'STABILITY_LOCK' | 'SUCCESS'>('WARMUP');
+  const [guidanceMessage, setGuidanceMessage] = useState('Initializing camera...');
 
   // Live Quantitative Metrics Cockpit
   const [numFaces, setNumFaces]               = useState(0);
@@ -50,6 +51,10 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
   const [sharpnessLaplacian, setSharpness]    = useState(0.0);
   const [brightnessVal, setBrightness]        = useState(0.0);
   const [livenessScore, setLivenessScore]     = useState(0.0);
+
+  // Warmup & Lighting Debounce Counters
+  const frameCountRef = useRef(0);
+  const consecutiveDarkFramesRef = useRef(0);
 
   // Stability Hold & Countdown
   const [holdTimerMs, setHoldTimerMs]         = useState(0);
@@ -78,6 +83,8 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
           setCameraActive(true);
+          frameCountRef.current = 0;
+          consecutiveDarkFramesRef.current = 0;
         }
       } catch (err) {
         setError('Camera access is required for real-time biometric face enrollment.');
@@ -113,6 +120,17 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
           ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
           ctx.restore();
 
+          frameCountRef.current += 1;
+
+          // ── STATE 0: CAMERA_WARMUP (Skip quality/lighting checks for first 20 frames / 750ms) ──
+          if (frameCountRef.current <= 20) {
+            setCurrentState('CAMERA_WARMUP');
+            setStatusType('WARMUP');
+            setGuidanceMessage('Initializing camera...');
+            animId = requestAnimationFrame(processFrame);
+            return;
+          }
+
           const w = canvas.width;
           const h = canvas.height;
 
@@ -145,20 +163,24 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
           setBrightness(Math.round(meanBrightness * 10) / 10);
           setSharpness(Math.round(sharpLaplacian * 10) / 10);
 
-          // 2. STATE 1: SEARCHING CHECK
+          // 2. DYNAMIC LIGHTING DEBOUNCING (Requires 5 consecutive dark frames)
           const dark = meanBrightness < 40;
           const overexp = meanBrightness > 220;
-          const blurry = sharpLaplacian < 100.0;
 
           if (dark || overexp) {
-            setNumFaces(0);
-            setDetectionConf(0.0);
-            setCurrentState('SEARCHING');
-            setStatusType('REJECT');
-            setGuidanceMessage('Bad lighting. Move to better light.');
-            resetHoldTimer();
-            animId = requestAnimationFrame(processFrame);
-            return;
+            consecutiveDarkFramesRef.current += 1;
+            if (consecutiveDarkFramesRef.current >= 5) {
+              setNumFaces(0);
+              setDetectionConf(0.0);
+              setCurrentState('QUALITY_AND_POSE_CHECK');
+              setStatusType('GUIDANCE');
+              setGuidanceMessage('Bad lighting. Move to better light.');
+              resetHoldTimer();
+              animId = requestAnimationFrame(processFrame);
+              return;
+            }
+          } else {
+            consecutiveDarkFramesRef.current = 0;
           }
 
           // Face Detected!
@@ -175,6 +197,8 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
           setPitch(cPitch);
           setRoll(cRoll);
           setLivenessScore(0.98);
+
+          const blurry = sharpLaplacian < 100.0;
 
           if (cYaw < -10.0) {
             setCurrentState('QUALITY_AND_POSE_CHECK');

@@ -14,7 +14,36 @@ from app.analysis.biometric_enrollment_engine import (
 
 @pytest.fixture
 def engine():
-    return BiometricEnrollmentEngine(liveness_threshold=0.92, sharpness_threshold=100.0)
+    return BiometricEnrollmentEngine(liveness_threshold=0.92, sharpness_threshold=100.0, warmup_frames=0)
+
+
+def test_camera_warmup_and_lighting_debouncing():
+    warmup_engine = BiometricEnrollmentEngine(warmup_frames=5)
+    dark_metrics = BiometricInferenceMetrics(
+        num_faces_detected=1,
+        detection_confidence=0.95,
+        bounding_box=[100, 100, 300, 300],
+        pose_degrees=PoseDegrees(yaw=0.0, pitch=0.0, roll=0.0),
+        quality_metrics=QualityMetrics(sharpness_laplacian=150.0, exposure_mean_brightness=20.0, occlusion_score=0.0),
+        liveness_score=0.98,
+    )
+    
+    # Frames 1..5 should return CAMERA_WARMUP
+    for _ in range(5):
+        res = warmup_engine.evaluate_state_machine(dark_metrics)
+        assert res.state == "CAMERA_WARMUP"
+        assert res.status == "WARMUP"
+        assert res.message == "Initializing camera..."
+
+    # Frames 1..4 post-warmup: consecutive dark frames 1..4 should be debounced
+    for _ in range(4):
+        res = warmup_engine.evaluate_state_machine(dark_metrics)
+        assert res.message != "Bad lighting. Move to better light."
+
+    # 5th consecutive dark frame post-warmup triggers Bad lighting guidance
+    res = warmup_engine.evaluate_state_machine(dark_metrics)
+    assert res.status == "GUIDANCE"
+    assert res.message == "Bad lighting. Move to better light."
 
 
 def test_state_searching_no_face(engine):
