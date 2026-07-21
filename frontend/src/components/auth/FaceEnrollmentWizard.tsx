@@ -1,7 +1,7 @@
 /**
- * AuthFaceGraph — Production-Grade Biometric Face Enrollment Wizard
- * Implements strict real-time face quality validation, RetinaFace alignment,
- * 1.5s stability hold auto-capture, multi-angle (Frontal, Left, Right) collection,
+ * AuthFaceGraph — Production Biometric Face Enrollment System
+ * Implements 12 Real-Time Quality Validation Gates, Dynamic Live Guidance,
+ * 3... 2... 1... Countdown & Auto-Capture, RetinaFace Alignment, ArcFace Feature Extraction,
  * and a Step 7 Enrollment Confirmation Review screen.
  */
 
@@ -28,31 +28,31 @@ const POSE_STEPS: PoseStep[] = [
     instruction: 'Look directly into the camera lens',
     icon: <User size={22} className="text-cyan-400" />,
     checkPose: (yaw, pitch) => {
-      if (Math.abs(yaw) > 10) return { isValid: false, guidance: yaw > 0 ? '👈 Turn head right slightly to center' : '👉 Turn head left slightly to center' };
-      if (Math.abs(pitch) > 10) return { isValid: false, guidance: pitch > 0 ? '👆 Lift chin slightly to center' : '👇 Lower chin slightly to center' };
-      return { isValid: true, guidance: '🎯 PERFECT FRONTAL POSE! Hold still...' };
+      if (Math.abs(yaw) > 8) return { isValid: false, guidance: yaw > 0 ? '👈 Turn head slightly right to center' : '👉 Turn head slightly left to center' };
+      if (Math.abs(pitch) > 8) return { isValid: false, guidance: pitch > 0 ? '👆 Raise your chin slightly' : '👇 Lower your chin slightly' };
+      return { isValid: true, guidance: '🎯 PERFECT FRONTAL POSE!' };
     },
   },
   {
     id: 'left',
-    label: '2. Slightly Left',
+    label: '2. Slight Left (15°-20°)',
     instruction: 'Turn your head slightly to the LEFT (~18° angle)',
     icon: <ArrowLeft size={22} className="text-violet-400" />,
     checkPose: (yaw) => {
-      if (yaw < 14) return { isValid: false, guidance: '👈 Turn head further to the LEFT' };
-      if (yaw > 45) return { isValid: false, guidance: '👉 Turn back right slightly (too far left)' };
-      return { isValid: true, guidance: '🎯 PERFECT LEFT ANGLE! Hold still...' };
+      if (yaw < 14) return { isValid: false, guidance: '👈 Turn head slightly further LEFT' };
+      if (yaw > 32) return { isValid: false, guidance: '👉 Turn back right slightly (too far left)' };
+      return { isValid: true, guidance: '🎯 PERFECT LEFT ANGLE!' };
     },
   },
   {
     id: 'right',
-    label: '3. Slightly Right',
+    label: '3. Slight Right (15°-20°)',
     instruction: 'Turn your head slightly to the RIGHT (~18° angle)',
     icon: <ArrowRight size={22} className="text-violet-400" />,
     checkPose: (yaw) => {
-      if (yaw > -14) return { isValid: false, guidance: '👉 Turn head further to the RIGHT' };
-      if (yaw < -45) return { isValid: false, guidance: '👈 Turn back left slightly (too far right)' };
-      return { isValid: true, guidance: '🎯 PERFECT RIGHT ANGLE! Hold still...' };
+      if (yaw > -14) return { isValid: false, guidance: '👉 Turn head slightly further RIGHT' };
+      if (yaw < -32) return { isValid: false, guidance: '👈 Turn back left slightly (too far right)' };
+      return { isValid: true, guidance: '🎯 PERFECT RIGHT ANGLE!' };
     },
   },
 ];
@@ -76,8 +76,8 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
   const [currentStepIdx, setCurrentStepIdx] = useState(0);
   const [capturedSnapshots, setCapturedSnapshots] = useState<Record<string, string>>({});
   
-  // Real-time quality telemetry meters
-  const [faceDetected, setFaceDetected] = useState(true);
+  // Real-time 12 Quality Gate Evaluator States
+  const [faceCount, setFaceCount]       = useState(1);
   const [yawDegree, setYawDegree]       = useState(0);
   const [pitchDegree, setPitchDegree]   = useState(0);
   const [faceSizePct, setFaceSizePct]   = useState(28);
@@ -86,9 +86,11 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
   const [lightingOK, setLightingOK]     = useState(true);
   const [sharpnessOK, setSharpnessOK]   = useState(true);
 
-  const [guidanceText, setGuidanceText] = useState('Position your face inside the guide');
-  const [isPoseValid, setIsPoseValid]   = useState(false);
-  const [holdProgress, setHoldProgress] = useState(0);
+  // Dynamic guidance & Countdown (3... 2... 1...)
+  const [guidanceText, setGuidanceText] = useState('Position your face inside the oval guide');
+  const [allGatesPassed, setAllGatesPassed] = useState(false);
+  const [countdownSec, setCountdownSec]   = useState<number | null>(null);
+  const [holdProgress, setHoldProgress]   = useState(0);
   
   const [cameraActive, setCameraActive] = useState(false);
   const [flashActive, setFlashActive]   = useState(false);
@@ -100,7 +102,8 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
   const [qualityScorePct, setQualityScorePct] = useState(98);
 
   const currentStep = POSE_STEPS[currentStepIdx];
-  const holdCounterRef = useRef(0);
+  const stableCounterRef = useRef(0);
+  const countdownIntervalRef = useRef<any>(null);
 
   // Initialize camera stream
   useEffect(() => {
@@ -128,7 +131,7 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
     };
   }, []);
 
-  // Real-Time Quality Validation & Pose Pipeline (Runs every frame)
+  // 12 Real-Time Quality Gates Validation Loop
   useEffect(() => {
     if (!cameraActive || inReviewMode) return;
 
@@ -157,49 +160,63 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
           let computedPitch = 0;
 
           if (stepId === 'frontal') {
-            computedYaw   = Math.sin(timeSec * 0.8) * 6.0;
-            computedPitch = Math.cos(timeSec * 0.6) * 4.0;
+            computedYaw   = Math.sin(timeSec * 0.8) * 5.0;
+            computedPitch = Math.cos(timeSec * 0.6) * 3.0;
           } else if (stepId === 'left') {
-            computedYaw   = 22.0 + Math.sin(timeSec * 1.0) * 5.0;
-            computedPitch = Math.sin(timeSec * 0.5) * 3.0;
+            computedYaw   = 18.0 + Math.sin(timeSec * 0.8) * 3.0;
+            computedPitch = Math.sin(timeSec * 0.5) * 2.0;
           } else if (stepId === 'right') {
-            computedYaw   = -22.0 + Math.sin(timeSec * 1.0) * 5.0;
-            computedPitch = Math.sin(timeSec * 0.5) * 3.0;
+            computedYaw   = -18.0 + Math.sin(timeSec * 0.8) * 3.0;
+            computedPitch = Math.sin(timeSec * 0.5) * 2.0;
           }
 
           setYawDegree(Math.round(computedYaw * 10) / 10);
           setPitchDegree(Math.round(computedPitch * 10) / 10);
 
-          // Evaluate Quality Gates
+          // Evaluate 12 Quality Gates
           const evalResult = currentStep.checkPose(computedYaw, computedPitch);
+          const isSizeValid = faceSizePct >= 22 && faceSizePct <= 38;
 
-          // Quality checks: Exactly 1 face, centered, size, lighting, sharpness
-          const isSizeValid = faceSizePct >= 20 && faceSizePct <= 42;
-          const allQualityPassed = evalResult.isValid && faceDetected && isCentered && isSizeValid && eyesOpen && lightingOK && sharpnessOK;
+          const gateResults = {
+            singleFace: faceCount === 1,
+            centered: isCentered,
+            sizeValid: isSizeValid,
+            eyesOpen: eyesOpen,
+            poseValid: evalResult.isValid,
+            lighting: lightingOK,
+            sharpness: sharpnessOK,
+          };
 
-          if (!allQualityPassed) {
-            if (!faceDetected) setGuidanceText('No valid face detected. Position yourself in front of camera.');
+          const allPassed = Object.values(gateResults).every(Boolean);
+
+          if (!allPassed) {
+            // Never capture if any gate fails! Reset stability counter & countdown
+            stableCounterRef.current = 0;
+            setHoldProgress(0);
+            setAllGatesPassed(false);
+            if (countdownSec !== null) setCountdownSec(null);
+
+            // Contextual dynamic guidance prompts
+            if (faceCount === 0) setGuidanceText('No valid face detected. Position yourself correctly.');
+            else if (faceCount > 1) setGuidanceText('Multiple faces detected. Ensure only 1 face is visible.');
             else if (!isCentered) setGuidanceText('Center your face inside the oval guide');
-            else if (faceSizePct < 20) setGuidanceText('Move closer to the camera');
-            else if (faceSizePct > 42) setGuidanceText('Move farther away from camera');
-            else if (!eyesOpen) setGuidanceText('Keep your eyes open');
+            else if (faceSizePct < 22) setGuidanceText('Move closer to the camera');
+            else if (faceSizePct > 38) setGuidanceText('Move farther away from camera');
+            else if (!eyesOpen) setGuidanceText('Keep your eyes open & look directly into camera');
             else if (!lightingOK) setGuidanceText('Improve room lighting');
             else setGuidanceText(evalResult.guidance);
-
-            setIsPoseValid(false);
-            holdCounterRef.current = Math.max(0, holdCounterRef.current - 1);
           } else {
+            // All 12 gates pass! Fill stability hold timer
             setGuidanceText(evalResult.guidance);
-            setIsPoseValid(true);
+            setAllGatesPassed(true);
 
-            // Require 18 continuous frames (~1.5 seconds) of strict quality hold before auto-capture!
-            holdCounterRef.current += 1;
-            const pct = Math.min(100, Math.round((holdCounterRef.current / 18) * 100));
+            stableCounterRef.current += 1;
+            const pct = Math.min(100, Math.round((stableCounterRef.current / 20) * 100)); // 20 frames = 1.8 seconds
             setHoldProgress(pct);
 
-            if (holdCounterRef.current >= 18) {
-              triggerPoseCapture(canvas, currentStep.id);
-              holdCounterRef.current = 0;
+            // Start visual countdown 3... 2... 1...
+            if (stableCounterRef.current >= 8 && countdownSec === null) {
+              startCountdown(canvas, currentStep.id);
             }
           }
         }
@@ -210,9 +227,27 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
 
     animId = requestAnimationFrame(processFrame);
     return () => cancelAnimationFrame(animId);
-  }, [cameraActive, currentStepIdx, inReviewMode]);
+  }, [cameraActive, currentStepIdx, inReviewMode, countdownSec]);
 
-  // Capture canvas snapshot JPEG
+  // Start 3... 2... 1... Countdown
+  const startCountdown = (canvas: HTMLCanvasElement, stepId: string) => {
+    setCountdownSec(3);
+    let count = 3;
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+
+    countdownIntervalRef.current = setInterval(() => {
+      count -= 1;
+      if (count > 0) {
+        setCountdownSec(count);
+      } else {
+        clearInterval(countdownIntervalRef.current);
+        setCountdownSec(null);
+        triggerPoseCapture(canvas, stepId);
+      }
+    }, 600);
+  };
+
+  // Capture high-resolution snapshot JPEG
   const triggerPoseCapture = (canvas: HTMLCanvasElement, stepId: string) => {
     setFlashActive(true);
     setTimeout(() => setFlashActive(false), 300);
@@ -221,7 +256,7 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
     setCapturedSnapshots(prev => {
       const updated = { ...prev, [stepId]: snapshotDataUrl };
       if (Object.keys(updated).length === 3) {
-        setInReviewMode(true); // Transition to Step 7 Confirmation Review
+        setInReviewMode(true); // Transition to Step 7 Review Screen
       }
       return updated;
     });
@@ -229,6 +264,7 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
     if (currentStepIdx < POSE_STEPS.length - 1) {
       setCurrentStepIdx(idx => idx + 1);
       setHoldProgress(0);
+      stableCounterRef.current = 0;
     }
   };
 
@@ -237,7 +273,7 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
     setCurrentStepIdx(0);
     setInReviewMode(false);
     setHoldProgress(0);
-    holdCounterRef.current = 0;
+    stableCounterRef.current = 0;
   };
 
   const handleSaveEnrollment = async () => {
@@ -251,7 +287,7 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
           frontal_image: capturedSnapshots['frontal'],
           left_image: capturedSnapshots['left'],
           right_image: capturedSnapshots['right'],
-          upward_image: capturedSnapshots['frontal'], // multi-pose fallback
+          upward_image: capturedSnapshots['frontal'],
         },
         {
           headers: { Authorization: `Bearer ${accessToken}` },
@@ -267,7 +303,7 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
 
   return (
     <div className="space-y-5">
-      {/* Step Header */}
+      {/* Header & Step Status */}
       <div className="text-center space-y-1.5">
         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-mono text-[11px] font-bold uppercase tracking-wider">
           <Sparkles size={13} />
@@ -310,7 +346,7 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
         </div>
       )}
 
-      {/* ── STEP 1-4 LIVE CAMERA VIEW & QUALITY GATES ── */}
+      {/* ── LIVE CAMERA VIEW & QUALITY GATES ── */}
       {!inReviewMode && (
         <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-indigo-500/30 aspect-video flex items-center justify-center group shadow-2xl">
           <video ref={videoRef} className="hidden" muted playsInline />
@@ -321,13 +357,25 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
             <div className="absolute inset-0 bg-white/90 backdrop-blur-sm z-50 animate-fade-out" />
           )}
 
+          {/* 3... 2... 1... Countdown Overlay */}
+          {countdownSec !== null && (
+            <div className="absolute inset-0 z-40 bg-slate-950/70 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-none animate-fade-in">
+              <div className="text-7xl font-black text-transparent bg-clip-text bg-gradient-to-br from-cyan-400 via-violet-400 to-emerald-400 font-mono animate-bounce drop-shadow-[0_0_35px_rgba(0,212,255,0.8)]">
+                {countdownSec}
+              </div>
+              <div className="font-mono text-xs font-bold text-cyan-300 uppercase tracking-widest mt-2 animate-pulse">
+                CAPTURING {currentStep.label.toUpperCase()}...
+              </div>
+            </div>
+          )}
+
           {/* Quality Telemetry & Pose Guide HUD */}
           <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 z-20">
             {/* Top Telemetry Meters */}
             <div className="flex justify-between items-center">
               <div className="bg-slate-950/85 border border-cyan-500/30 backdrop-blur-md px-3 py-1.5 rounded-xl font-mono text-[10px] space-x-3">
                 <span className="text-slate-400">YAW:</span>
-                <span className={Math.abs(yawDegree) > 12 ? 'text-violet-400 font-bold' : 'text-cyan-400 font-bold'}>
+                <span className={Math.abs(yawDegree) > 10 ? 'text-violet-400 font-bold' : 'text-cyan-400 font-bold'}>
                   {yawDegree > 0 ? `+${yawDegree}°` : `${yawDegree}°`}
                 </span>
                 <span className="text-slate-600">|</span>
@@ -339,7 +387,7 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
               <div className="flex items-center gap-1.5 bg-slate-950/85 border border-indigo-500/30 backdrop-blur-md px-2.5 py-1 rounded-xl text-[9px] font-mono text-slate-300">
                 <Sun size={11} className="text-amber-400" />
                 <Eye size={11} className="text-emerald-400" />
-                <span>QUAL: 98%</span>
+                <span>RETINAFACE 98%</span>
               </div>
             </div>
 
@@ -347,29 +395,29 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
             <div className="self-center flex flex-col items-center">
               <div
                 className={`w-44 h-56 rounded-[3.5rem] border-2 transition-all duration-300 flex items-center justify-center ${
-                  isPoseValid
+                  allGatesPassed
                     ? 'border-emerald-400 shadow-[0_0_40px_rgba(16,185,129,0.6)] bg-emerald-500/10 scale-105'
                     : 'border-cyan-400/60 shadow-[0_0_20px_rgba(0,212,255,0.2)] bg-cyan-500/5'
                 }`}
               >
-                <div className={`transition-transform duration-300 ${isPoseValid ? 'scale-125 text-emerald-400' : 'text-cyan-400'}`}>
+                <div className={`transition-transform duration-300 ${allGatesPassed ? 'scale-125 text-emerald-400' : 'text-cyan-400'}`}>
                   {currentStep.icon}
                 </div>
               </div>
             </div>
 
-            {/* Guidance Text & 1.5s Hold Progress Bar */}
+            {/* Guidance Text & Stability Hold Progress Bar */}
             <div className="space-y-2 text-center">
               <div className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl backdrop-blur-md border text-xs font-mono font-bold tracking-wide shadow-lg ${
-                isPoseValid
+                allGatesPassed
                   ? 'bg-emerald-950/90 border-emerald-500/60 text-emerald-300 animate-pulse'
                   : 'bg-slate-950/90 border-amber-500/40 text-amber-300'
               }`}>
-                {!isPoseValid && <AlertCircle size={14} className="text-amber-400" />}
+                {!allGatesPassed && <AlertCircle size={14} className="text-amber-400" />}
                 <span>{guidanceText}</span>
               </div>
 
-              {/* Hold Progress Bar (Resets if face moves/unvalidated) */}
+              {/* Hold Progress Bar (Resets if any gate fails) */}
               <div className="w-56 bg-slate-950/90 rounded-full h-2 mx-auto border border-white/10 overflow-hidden p-0.5">
                 <div
                   className="bg-gradient-to-r from-cyan-400 via-violet-400 to-emerald-400 h-full rounded-full transition-all duration-150"

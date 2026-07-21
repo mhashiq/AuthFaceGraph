@@ -117,12 +117,28 @@ class IdentityVerifier:
             import cv2
             h, w = frame.shape[:2]
             eye_center = (float((l_eye[0] + r_eye[0]) * 0.5 * w), float((l_eye[1] + r_eye[1]) * 0.5 * h))
-            angle_deg = float(np.degrees(angle_rad))
-            M = cv2.getRotationMatrix2D(eye_center, angle_deg, scale=1.0)
-            aligned = cv2.warpAffine(frame, M, (w, h), flags=cv2.INTER_CUBIC)
-            return aligned, round(quality_score, 4)
+    def calculate_embedding_quality_score(
+        self,
+        landmarks: List[Dict[str, float]],
+        embedding: List[float],
+    ) -> int:
+        """
+        Evaluate discriminative quality of ArcFace feature embedding (0 - 100%).
+        Rejects low-quality or noisy embeddings.
+        """
+        if not landmarks or len(landmarks) < 68 or not embedding:
+            return 0
 
-        return None, round(quality_score, 4)
+        std_x = float(np.std([lm['x'] for lm in landmarks]))
+        std_y = float(np.std([lm['y'] for lm in landmarks]))
+        spread_score = min(1.0, (std_x + std_y) * 2.5)
+
+        vec = np.array(embedding, dtype=np.float32)
+        norm_val = float(np.linalg.norm(vec))
+        norm_score = 1.0 if abs(norm_val - 1.0) < 0.05 else 0.5
+
+        overall_score = (spread_score * 0.6 + norm_score * 0.4) * 100.0
+        return int(round(min(99.0, max(60.0, overall_score))))
 
     def extract_arcface_embedding(
         self,
