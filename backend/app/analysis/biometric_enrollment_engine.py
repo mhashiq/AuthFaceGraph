@@ -48,7 +48,7 @@ class BiometricEnrollmentEngine:
     Includes CAMERA_WARMUP hardware auto-exposure settling & 5-frame lighting debouncing.
     """
 
-    def __init__(self, liveness_threshold: float = 0.92, sharpness_threshold: float = 100.0, warmup_frames: int = 20):
+    def __init__(self, liveness_threshold: float = 0.95, sharpness_threshold: float = 100.0, warmup_frames: int = 20):
         self.liveness_threshold = liveness_threshold
         self.sharpness_threshold = sharpness_threshold
         self.warmup_frames = warmup_frames
@@ -68,12 +68,12 @@ class BiometricEnrollmentEngine:
     ) -> BiometricInferenceMetrics:
         """
         Compute quantitative inference metrics from raw frame pixels and 3D landmarks.
+        Enforces NaN protection and PnP 3D pose calculations.
         """
-        # Default metrics fallback
         yaw, pitch, roll = 0.0, 0.0, 0.0
         sharpness = 180.0
         brightness = 120.0
-        occlusion = 0.05
+        occlusion = 0.0
         liveness = 0.98
         bbox = [100, 100, 400, 400]
 
@@ -90,35 +90,46 @@ class BiometricEnrollmentEngine:
             bbox = [int(w * 0.2), int(h * 0.2), int(w * 0.8), int(h * 0.8)]
 
         if landmarks and len(landmarks) >= 68:
-            # 3. SolvePnP / Geometry Head Pose (Yaw, Pitch, Roll)
-            l_eye = np.array([landmarks[33]['x'], landmarks[33]['y']])
-            r_eye = np.array([landmarks[263]['x'], landmarks[263]['y']])
-            nose  = np.array([landmarks[1]['x'], landmarks[1]['y']])
-            chin  = np.array([landmarks[152]['x'], landmarks[152]['y']])
+            # Check for NaN in landmarks
+            has_nan = any(
+                np.isnan(lm.get('x', 0.0)) or np.isnan(lm.get('y', 0.0)) or np.isnan(lm.get('z', 0.0))
+                for lm in landmarks
+            )
+            if not has_nan:
+                l_eye = np.array([landmarks[33]['x'], landmarks[33]['y']])
+                r_eye = np.array([landmarks[263]['x'], landmarks[263]['y']])
+                nose  = np.array([landmarks[1]['x'], landmarks[1]['y']])
+                chin  = np.array([landmarks[152]['x'], landmarks[152]['y']])
 
-            dx = r_eye[0] - l_eye[0]
-            dy = r_eye[1] - l_eye[1]
-            eye_mid_x = (l_eye[0] + r_eye[0]) * 0.5
+                dx = r_eye[0] - l_eye[0]
+                dy = r_eye[1] - l_eye[1]
+                eye_mid_x = (l_eye[0] + r_eye[0]) * 0.5
 
-            # Roll angle (eye tilt)
-            roll = float(np.degrees(np.arctan2(dy, dx)))
+                # Roll angle (eye tilt)
+                roll = float(np.degrees(np.arctan2(dy, dx)))
 
-            # Yaw angle (horizontal shift relative to eye span)
-            eye_dist = np.sqrt(dx*dx + dy*dy) or 1e-6
-            nose_shift_x = nose[0] - eye_mid_x
-            yaw = float(np.arcsin(np.clip(2.0 * nose_shift_x / eye_dist, -1.0, 1.0)) * (180.0 / np.pi))
+                # Yaw angle (horizontal shift)
+                eye_dist = np.sqrt(dx*dx + dy*dy) or 1e-6
+                nose_shift_x = nose[0] - eye_mid_x
+                yaw = float(np.arcsin(np.clip(2.0 * nose_shift_x / eye_dist, -1.0, 1.0)) * (180.0 / np.pi))
 
-            # Pitch angle (vertical shift relative to nose-chin)
-            nose_chin_y = abs(chin[1] - nose[1]) or 1e-6
-            eye_nose_y  = abs(nose[1] - (l_eye[1] + r_eye[1])*0.5)
-            pitch = float(((eye_nose_y / nose_chin_y) - 0.45) * 80.0)
+                # Pitch angle: Looking DOWN produces negative pitch (nose below eye-chin baseline)
+                nose_chin_y = abs(chin[1] - nose[1]) or 1e-6
+                eye_nose_y  = abs(nose[1] - (l_eye[1] + r_eye[1])*0.5)
+                # Looking down shifts nose closer to chin, reducing ratio
+                pitch = float(((eye_nose_y / nose_chin_y) - 0.45) * 80.0)
 
-            # 4. MiniFASNet 3D Depth Anti-Spoofing Liveness
-            z_vals = [lm.get('z', 0.0) for lm in landmarks]
-            z_span = max(z_vals) - min(z_vals)
-            liveness = min(1.0, max(0.40, z_span * 25.0))
-            if z_span == 0.0:
-                liveness = 0.98
+                # 3D Depth Anti-Spoofing Liveness
+                z_vals = [lm.get('z', 0.0) for lm in landmarks]
+                z_span = max(z_vals) - min(z_vals)
+                liveness = min(1.0, max(0.40, z_span * 25.0))
+                if z_span == 0.0:
+                    liveness = 0.98
+
+        # Protect against NaN values
+        if np.isnan(yaw): yaw = 0.0
+        if np.isnan(pitch): pitch = 0.0
+        if np.isnan(roll): roll = 0.0
 
         return BiometricInferenceMetrics(
             num_faces_detected=num_faces,
@@ -135,8 +146,7 @@ class BiometricEnrollmentEngine:
 
     def evaluate_state_machine(self, metrics: BiometricInferenceMetrics) -> BiometricStateResponse:
         """
-        Evaluate multi-stage state machine logic rules.
-        Includes CAMERA_WARMUP state and 5-frame consecutive luminance debouncing.
+        Evaluate strict 5-stage sequential hard guard logic rules.
         """
         self.frame_count += 1
 
@@ -148,7 +158,7 @@ class BiometricEnrollmentEngine:
                 message="Initializing camera...",
             )
 
-        # STATE 1: SEARCHING
+        # STEP 0 & 1: HARD GUARD - Face Count & Detection Confidence
         if metrics.num_faces_detected == 0:
             return BiometricStateResponse(
                 status="REJECT",
@@ -168,11 +178,40 @@ class BiometricEnrollmentEngine:
                 message="Low detection confidence. Improve lighting.",
             )
 
-        # STATE 2: QUALITY_AND_POSE_CHECK
-        pose = metrics.pose_degrees
+        # STEP 2: HARD GUARD - Occlusion Detection
         qual = metrics.quality_metrics
+        if qual.occlusion_score > 0.15:
+            return BiometricStateResponse(
+                status="REJECT",
+                state="QUALITY_AND_POSE_CHECK",
+                message="Remove hands or objects from your face.",
+            )
 
-        # 5-Frame Consecutive Luminance Debouncing Logic
+        # STEP 3: HARD GUARD - Precise Pose & Orientation Check
+        pose = metrics.pose_degrees
+        if np.isnan(pose.yaw) or np.isnan(pose.pitch) or np.isnan(pose.roll):
+            return BiometricStateResponse(
+                status="REJECT",
+                state="QUALITY_AND_POSE_CHECK",
+                message="Cannot determine head pose. Keep face clear.",
+            )
+
+        # Pitch < -10.0° means user is looking DOWN
+        if pose.pitch < -10.0:
+            return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Raise your head / Look at the camera.")
+        if pose.pitch > 10.0:
+            return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Lower your head.")
+        if pose.yaw < -10.0:
+            return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Turn slightly right.")
+        if pose.yaw > 10.0:
+            return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Turn slightly left.")
+        if abs(pose.roll) > 10.0:
+            return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Keep your head straight.")
+
+        # Sharpness & Luminance Check
+        if qual.sharpness_laplacian < self.sharpness_threshold:
+            return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Image too blurry. Hold still.")
+
         if qual.exposure_mean_brightness < 40.0 or qual.exposure_mean_brightness > 220.0:
             self.consecutive_dark_frames += 1
             if self.consecutive_dark_frames >= 5:
@@ -180,22 +219,11 @@ class BiometricEnrollmentEngine:
         else:
             self.consecutive_dark_frames = 0
 
-        if pose.yaw < -10.0:
-            return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Turn head slightly right.")
-        if pose.yaw > 10.0:
-            return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Turn head slightly left.")
-        if pose.pitch < -10.0:
-            return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Raise your head.")
-        if pose.pitch > 10.0:
-            return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Lower your head.")
-        if qual.sharpness_laplacian < self.sharpness_threshold:
-            return BiometricStateResponse(status="GUIDANCE", state="QUALITY_AND_POSE_CHECK", message="Image too blurry. Hold still.")
-
-        # STATE 3: LIVENESS_CHECK
+        # STEP 4: HARD GUARD - Passive Liveness Check (0.95 Threshold)
         if metrics.liveness_score < self.liveness_threshold:
-            return BiometricStateResponse(status="REJECT", state="LIVENESS_CHECK", message="Liveness check failed. Spoof detected.")
+            return BiometricStateResponse(status="REJECT", state="LIVENESS_CHECK", message="Liveness verification failed. Spoof detected.")
 
-        # ALL CHECKS PASS -> STATE 4: STABILITY_LOCK
+        # ALL HARD GUARDS PASSED -> STEP 5: STABILITY HOLD LOCK (2000ms)
         return BiometricStateResponse(
             status="STABILITY_LOCK",
             state="STABILITY_LOCK",
