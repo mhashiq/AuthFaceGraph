@@ -200,7 +200,7 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
           setRoll(cRoll);
           setLivenessScore(0.98);
 
-          const blurry = sharpLaplacian < 100.0;
+          const blurry = sharpLaplacian < 15.0;
 
           if (cYaw < -10.0) {
             setCurrentState('QUALITY_AND_POSE_CHECK');
@@ -245,7 +245,7 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
             const elapsed = now - stableStartTimeRef.current;
             setHoldTimerMs(Math.min(2000, elapsed));
 
-            if (elapsed >= 2000 && countdownSec === null) {
+            if (elapsed >= 1500 && countdownSec === null) {
               startCountdown(canvas);
             }
           }
@@ -428,6 +428,26 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Manual Snap Trigger Button */}
+      {currentState !== 'ENROLLMENT_COMPLETE' && (
+        <div className="flex justify-between items-center px-1 pt-1">
+          <span className="font-mono text-[10px] text-slate-400">
+            Auto-captures after stability lock (1.5s) or click button to capture now.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const canvas = canvasRef.current;
+              if (canvas) triggerCaptureAndVerification(canvas);
+            }}
+            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-xs font-mono font-bold text-white shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
+          >
+            <Camera size={14} />
+            <span>Capture Biometric Selfie Now</span>
+          </button>
         </div>
       )}
 
