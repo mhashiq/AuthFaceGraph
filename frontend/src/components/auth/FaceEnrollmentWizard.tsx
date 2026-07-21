@@ -83,10 +83,12 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
           setCameraActive(true);
+          setError(null); // Clear error on successful stream start
           frameCountRef.current = 0;
           consecutiveDarkFramesRef.current = 0;
         }
       } catch (err) {
+        setCameraActive(false);
         setError('Camera access is required for real-time biometric face enrollment.');
       }
     };
@@ -478,10 +480,19 @@ export const FaceEnrollmentWizard: React.FC<FaceEnrollmentWizardProps> = ({
         </div>
       )}
 
-      {error && (
-        <div className="px-4 py-3 rounded-xl bg-red-950/60 border border-red-500/30 font-mono text-xs text-red-400 flex items-center gap-2">
-          <XCircle size={15} />
-          <span>{error}</span>
+      {error && !cameraActive && (
+        <div className="px-4 py-3 rounded-xl bg-red-950/60 border border-red-500/30 font-mono text-xs text-red-400 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <XCircle size={15} />
+            <span>{error}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="px-2.5 py-1 rounded bg-red-900/50 hover:bg-red-800 text-[10px] text-white transition-colors"
+          >
+            Retry Camera
+          </button>
         </div>
       )}
     </div>
