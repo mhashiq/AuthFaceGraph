@@ -1,15 +1,16 @@
 /**
- * AuthFaceGraph — Premium Consent & Login Page
- * Cinematic dark glassmorphism login with animated background
+ * AuthFaceGraph — Premium Consent, Login & Registration Page
+ * Cinematic dark glassmorphic authentication & biometric consent workspace.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Shield, CheckCircle, ChevronRight, Zap, Lock } from 'lucide-react';
+import { Eye, EyeOff, Shield, CheckCircle, ChevronRight, Zap, Lock, UserPlus, UserCheck } from 'lucide-react';
 import axios from 'axios';
 import { useAuthStore, useAnalysisStore } from '../store';
 import type { LoginResponse, ConsentResponse } from '../types/analysis';
 import { NeonButton } from '../components/ui';
+import { FaceEnrollmentWizard } from '../components/auth/FaceEnrollmentWizard';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -18,15 +19,20 @@ export const ConsentPage: React.FC = () => {
   const { setAuth } = useAuthStore();
   const { setConsentGranted, setSessionId, addLog } = useAnalysisStore();
 
-  const [step, setStep] = useState<'login' | 'consent'>('login');
-  const [email, setEmail] = useState('');
+  const [step, setStep]         = useState<'login' | 'enrollment' | 'consent'>('login');
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
-  const [orgId, setOrgId]  = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [orgId, setOrgId]       = useState('');
+  
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
   const [consentChecked, setConsentChecked] = useState(false);
-  const [accessToken, setAccessToken] = useState('');
+  const [accessToken, setAccessToken]       = useState('');
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Animated background canvas
@@ -95,7 +101,6 @@ export const ConsentPage: React.FC = () => {
         ctx.shadowBlur = 0;
       });
 
-      // Draw connections
       for (let i = 0; i < particles.length; i++) {
         for (let j = i + 1; j < particles.length; j++) {
           const dx = particles[i].x - particles[j].x;
@@ -118,6 +123,13 @@ export const ConsentPage: React.FC = () => {
     return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', resize); };
   }, []);
 
+  const fillDemoAdmin = () => {
+    setEmail('admin@authbrain.com');
+    setPassword('password123');
+    setAuthMode('signin');
+    setError(null);
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -130,10 +142,40 @@ export const ConsentPage: React.FC = () => {
       });
       setAuth(res.data);
       setAccessToken(res.data.tokens.access_token);
-      setStep('consent');
+      setStep('enrollment');
       addLog('info', `Logged in as ${res.data.email}`, 'auth');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Authentication failed. Check credentials.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await axios.post<LoginResponse>(`${API_BASE}/api/auth/register`, {
+        full_name: fullName.trim() || 'AuthBrain User',
+        email: email.trim(),
+        password,
+        organization_name: 'AuthBrain Enterprise',
+      });
+      setAuth(res.data);
+      setAccessToken(res.data.tokens.access_token);
+      setStep('enrollment');
+      addLog('info', `Registered new account: ${res.data.email}`, 'auth');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Registration failed. Try again.');
     } finally {
       setLoading(false);
     }
@@ -161,7 +203,7 @@ export const ConsentPage: React.FC = () => {
   };
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center overflow-hidden gpu-accelerated">
+    <div className="relative min-h-screen flex items-center justify-center overflow-hidden gpu-accelerated py-10">
       {/* Animated BG canvas */}
       <canvas ref={canvasRef} className="absolute inset-0 z-0" />
 
@@ -189,25 +231,21 @@ export const ConsentPage: React.FC = () => {
       </div>
 
       {/* ── MAIN CARD ──────────────────────────────────────────────── */}
-      <div
-        className="relative z-10 w-full max-w-md mx-4 animate-card-enter"
-        style={{ animationDelay: '0.1s' }}
-      >
-        {/* Gradient border wrapper */}
+      <div className="relative z-10 w-full max-w-md mx-4 animate-card-enter">
         <div className="gradient-border p-[1px] rounded-2xl"
           style={{ background: 'linear-gradient(135deg, rgba(0,212,255,0.4), rgba(79,70,229,0.4), rgba(139,92,246,0.4))' }}>
           <div className="rounded-2xl p-8"
-            style={{ background: 'rgba(7,13,26,0.92)', backdropFilter: 'blur(24px)' }}>
+            style={{ background: 'rgba(7,13,26,0.94)', backdropFilter: 'blur(24px)' }}>
 
             {/* Header */}
-            <div className="flex items-center gap-3 mb-8">
+            <div className="flex items-center gap-3 mb-6">
               <div className="w-11 h-11 rounded-xl flex items-center justify-center"
                 style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)', boxShadow: '0 0 20px rgba(139,92,246,0.5)' }}>
-                {step === 'login' ? <Lock size={20} className="text-white" /> : <Shield size={20} className="text-white" />}
+                {step === 'login' ? (authMode === 'signin' ? <Lock size={20} className="text-white" /> : <UserPlus size={20} className="text-white" />) : <Shield size={20} className="text-white" />}
               </div>
               <div>
                 <h1 className="text-xl font-bold text-white font-display tracking-wide">
-                  {step === 'login' ? 'Secure Access' : 'Biometric Consent'}
+                  {step === 'login' ? (authMode === 'signin' ? 'Secure Sign In' : 'Create Account') : 'Biometric Consent'}
                 </h1>
                 <p className="text-[11px] text-slate-400 mt-0.5">
                   {step === 'login' ? 'AuthFaceGraph AI Platform' : 'Review & accept data processing terms'}
@@ -216,29 +254,57 @@ export const ConsentPage: React.FC = () => {
             </div>
 
             {/* Step indicator */}
-            <div className="flex items-center gap-2 mb-7">
-              {['login', 'consent'].map((s, i) => (
+            <div className="flex items-center gap-1.5 mb-6 overflow-x-auto">
+              {['login', 'enrollment', 'consent'].map((s, i) => (
                 <React.Fragment key={s}>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1">
                     <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold font-mono"
                       style={{
-                        background: step === s || (s === 'login' && step === 'consent')
+                        background: step === s
                           ? 'linear-gradient(135deg,#4f46e5,#7c3aed)'
                           : 'rgba(79,70,229,0.1)',
-                        color: step === s || (s === 'login' && step === 'consent') ? 'white' : '#5d7399',
+                        color: step === s ? 'white' : '#5d7399',
                         border: `1px solid ${step === s ? 'rgba(139,92,246,0.6)' : 'rgba(79,70,229,0.2)'}`,
                       }}>
-                      {s === 'login' && step === 'consent' ? '✓' : i + 1}
+                      {i + 1}
                     </div>
-                    <span className="font-mono text-[10px] uppercase tracking-wider"
+                    <span className="font-mono text-[9px] uppercase tracking-wider"
                       style={{ color: step === s ? '#c9d4f0' : '#3a4f70' }}>
-                      {s === 'login' ? 'Authenticate' : 'Consent'}
+                      {s === 'login' ? 'Auth' : s === 'enrollment' ? 'Enroll' : 'Consent'}
                     </span>
                   </div>
-                  {i < 1 && <ChevronRight size={12} className="text-slate-600" />}
+                  {i < 2 && <ChevronRight size={10} className="text-slate-600 flex-shrink-0" />}
                 </React.Fragment>
               ))}
             </div>
+
+            {/* Auth Mode Tabs (Sign In vs Sign Up) */}
+            {step === 'login' && (
+              <div className="flex bg-slate-950/80 p-1 rounded-xl border border-indigo-500/20 mb-6">
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('signin'); setError(null); }}
+                  className={`flex-1 py-2 rounded-lg text-xs font-mono font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    authMode === 'signin'
+                      ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-lg'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Lock size={12} /> Sign In
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('signup'); setError(null); }}
+                  className={`flex-1 py-2 rounded-lg text-xs font-mono font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    authMode === 'signup'
+                      ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-lg'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <UserPlus size={12} /> Sign Up
+                </button>
+              </div>
+            )}
 
             {/* Error message */}
             {error && (
@@ -248,8 +314,8 @@ export const ConsentPage: React.FC = () => {
               </div>
             )}
 
-            {/* ── LOGIN FORM ── */}
-            {step === 'login' && (
+            {/* ── SIGN IN FORM ── */}
+            {step === 'login' && authMode === 'signin' && (
               <form onSubmit={handleLogin} className="space-y-4">
                 <div className="space-y-1.5">
                   <label className="font-mono text-[10px] uppercase tracking-widest text-slate-400">
@@ -260,14 +326,14 @@ export const ConsentPage: React.FC = () => {
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     required
-                    placeholder="agent@authfacegraph.ai"
+                    placeholder="admin@authbrain.com"
                     className="neon-input w-full px-4 py-3 rounded-xl text-sm font-mono"
                   />
                 </div>
 
                 <div className="space-y-1.5">
                   <label className="font-mono text-[10px] uppercase tracking-widest text-slate-400">
-                    Passkey
+                    Password
                   </label>
                   <div className="relative">
                     <input
@@ -288,30 +354,102 @@ export const ConsentPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="pt-2">
+                  <NeonButton type="submit" loading={loading} fullWidth size="lg" variant="primary">
+                    <Zap size={16} />
+                    <span>Sign In & Authenticate</span>
+                  </NeonButton>
+                </div>
+
+                {/* Demo Quick Login Helper */}
+                <button
+                  type="button"
+                  onClick={fillDemoAdmin}
+                  className="w-full text-center font-mono text-[11px] text-cyan-400 hover:text-cyan-300 bg-cyan-950/30 border border-cyan-500/20 py-2 rounded-xl transition-all flex items-center justify-center gap-1.5"
+                >
+                  <UserCheck size={13} /> Fill Demo Credentials (admin@authbrain.com)
+                </button>
+
+                <p className="text-center font-mono text-[10px] text-slate-500 pt-1">
+                  AES-256 encrypted · Supabase Postgres · Zero-knowledge auth
+                </p>
+              </form>
+            )}
+
+            {/* ── SIGN UP FORM ── */}
+            {step === 'login' && authMode === 'signup' && (
+              <form onSubmit={handleRegister} className="space-y-3.5">
+                <div className="space-y-1">
                   <label className="font-mono text-[10px] uppercase tracking-widest text-slate-400">
-                    Organization ID <span className="text-slate-600">(optional)</span>
+                    Full Name
                   </label>
                   <input
                     type="text"
-                    value={orgId}
-                    onChange={e => setOrgId(e.target.value)}
-                    placeholder="ORG-XXXXXXXXXX"
-                    className="neon-input w-full px-4 py-3 rounded-xl text-sm font-mono"
+                    value={fullName}
+                    onChange={e => setFullName(e.target.value)}
+                    required
+                    placeholder="John Smith"
+                    className="neon-input w-full px-4 py-2.5 rounded-xl text-sm font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-mono text-[10px] uppercase tracking-widest text-slate-400">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    required
+                    placeholder="user@example.com"
+                    className="neon-input w-full px-4 py-2.5 rounded-xl text-sm font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-mono text-[10px] uppercase tracking-widest text-slate-400">
+                    Password
+                  </label>
+                  <input
+                    type={showPass ? 'text' : 'password'}
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    required
+                    placeholder="At least 6 characters"
+                    className="neon-input w-full px-4 py-2.5 rounded-xl text-sm font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-mono text-[10px] uppercase tracking-widest text-slate-400">
+                    Confirm Password
+                  </label>
+                  <input
+                    type={showPass ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    required
+                    placeholder="Repeat password"
+                    className="neon-input w-full px-4 py-2.5 rounded-xl text-sm font-mono"
                   />
                 </div>
 
                 <div className="pt-2">
                   <NeonButton type="submit" loading={loading} fullWidth size="lg" variant="primary">
-                    <Zap size={16} />
-                    <span>Authenticate & Enter</span>
+                    <UserPlus size={16} />
+                    <span>Create Account & Continue</span>
                   </NeonButton>
                 </div>
-
-                <p className="text-center font-mono text-[10px] text-slate-500 pt-1">
-                  AES-256 encrypted · Zero-knowledge auth · GDPR compliant
-                </p>
               </form>
+            )}
+
+            {/* ── ENROLLMENT WIZARD ── */}
+            {step === 'enrollment' && (
+              <FaceEnrollmentWizard
+                accessToken={accessToken}
+                onComplete={() => setStep('consent')}
+              />
             )}
 
             {/* ── CONSENT FORM ── */}

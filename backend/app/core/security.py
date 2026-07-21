@@ -78,6 +78,21 @@ class LoginRequest(BaseModel):
     org_id: str | None = None
 
 
+class RegisterRequest(BaseModel):
+    full_name: str
+    email: str
+    password: str
+    organization_name: str | None = "AuthBrain AI"
+
+
+class FaceEnrollmentRequest(BaseModel):
+    user_id: str | None = None
+    frontal_embedding: list[float]
+    left_embedding: list[float]
+    right_embedding: list[float]
+    upward_embedding: list[float]
+
+
 class LoginResponse(BaseModel):
     tokens: TokenPair
     user_id: str

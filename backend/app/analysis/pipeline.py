@@ -28,10 +28,12 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.expert_system.explainer import XAIExplainer
 from app.expert_system.scorer import ExpertSystemScorer
+from app.analysis.identity_verifier import IdentityVerifier
 from app.models.schemas import (
     FaceAnalysisResult,
     FaceBoundingBox,
     QualityResult,
+    IdentityVerificationResult,
 )
 from app.utils.frame_utils import (
     bgr_to_rgb,
@@ -95,6 +97,7 @@ class FaceAnalysisPipeline:
         self._quality_scorer = QualityScorer()
         self._expert_scorer = ExpertSystemScorer()
         self._xai_explainer = XAIExplainer()
+        self._identity_verifier = IdentityVerifier()
         self._dl_engine = None
 
         # Performance tracking
@@ -167,7 +170,20 @@ class FaceAnalysisPipeline:
         active_idx = min(active_face_index, face_count - 1)
         face = all_faces[active_idx]
 
-        # ── 4. Run all analyzers in sequence ───────────────────────────────────
+        # ── 4. Real-Time Identity Verification Layer ─────────────────────────
+        lm_dicts = [{"x": lm.x, "y": lm.y, "z": lm.z} for lm in face.landmarks]
+        id_eval = self._identity_verifier.verify_frame(lm_dicts, frame_bgr)
+        id_result = IdentityVerificationResult(
+            status=id_eval["status"],
+            enrolled_user_name=id_eval["enrolled_user_name"],
+            match_confidence=id_eval["match_confidence"],
+            liveness_score=id_eval["liveness_score"],
+            is_live=id_eval["is_live"],
+            is_enrolled=id_eval["is_enrolled"],
+            is_paused=id_eval["is_paused"],
+        )
+
+        # ── 5. Run all analyzers in sequence ───────────────────────────────────
         head_pose = self._head_pose.estimate(face)
         eyes = self._eye_analyzer.analyze(face)
         mouth = self._mouth_analyzer.analyze(face)
@@ -182,7 +198,7 @@ class FaceAnalysisPipeline:
             eye_closure_duration_ms=eyes.eye_closure_duration_ms,
         )
 
-        # ── 5. Expert system ───────────────────────────────────────────────────
+        # ── 6. Expert system ───────────────────────────────────────────────────
         expert_result = self._expert_scorer.score(
             eyes=eyes,
             mouth=mouth,
@@ -191,7 +207,12 @@ class FaceAnalysisPipeline:
             quality=quality,
         )
 
-        # ── 6. XAI Explanations ────────────────────────────────────────────────
+        # If identity verification is paused (mismatch or liveness failure), pause tracking!
+        if id_eval["is_paused"]:
+            behavior.attention_state = "paused"  # type: ignore[assignment]
+            expert_result.attention_state = "paused"  # type: ignore[assignment]
+
+        # ── 7. XAI Explanations ────────────────────────────────────────────────
         explanations = self._xai_explainer.explain(
             eyes=eyes,
             mouth=mouth,
@@ -202,9 +223,9 @@ class FaceAnalysisPipeline:
         )
         expert_result.explanations = explanations
 
-        # ── 7. Deep Learning (optional) ───────────────────────────────────────
+        # ── 8. Deep Learning (optional) ───────────────────────────────────────
         dl_result = None
-        if settings.DL_ENABLED:
+        if settings.DL_ENABLED and not id_eval["is_paused"]:
             if self._dl_engine is None:
                 try:
                     from app.dl.engine import DLEngine
@@ -230,16 +251,17 @@ class FaceAnalysisPipeline:
                 except Exception as exc:
                     logger.error("dl_inference_failed", error=str(exc))
 
-        # Log metrics for session-end database summary
-        self._ears.append(eyes.average_ear)
-        self._fatigues.append(expert_result.fatigue_score)
-        self._focuses.append(expert_result.focus_score)
-        self._qualities.append(quality.overall_score)
-        self._yaws.append(head_pose.yaw)
-        self._pitches.append(head_pose.pitch)
-        self._dominant_attentions.append(behavior.attention_state.value)
+        # Log metrics for session-end database summary (only when not paused)
+        if not id_eval["is_paused"]:
+            self._ears.append(eyes.average_ear)
+            self._fatigues.append(expert_result.fatigue_score)
+            self._focuses.append(expert_result.focus_score)
+            self._qualities.append(quality.overall_score)
+            self._yaws.append(head_pose.yaw)
+            self._pitches.append(head_pose.pitch)
+            self._dominant_attentions.append(behavior.attention_state.value if hasattr(behavior.attention_state, "value") else str(behavior.attention_state))
 
-        # ── 8. Draw overlay ────────────────────────────────────────────────────
+        # ── 9. Draw overlay ────────────────────────────────────────────────────
         if draw_overlay:
             landmark_xy = [(lm.x, lm.y) for lm in face.landmarks]
             annotated = draw_face_mesh_overlay(
@@ -251,21 +273,23 @@ class FaceAnalysisPipeline:
                 landmark_radius=1,
                 connection_thickness=1,
             )
+            box_color = (0, 255, 120) if not id_eval["is_paused"] else (0, 0, 255)
+            box_label = f"{id_eval['enrolled_user_name']} | {id_eval['match_confidence']:.1%}" if not id_eval["is_paused"] else "MISMATCH / PAUSED"
             annotated = draw_bounding_box(
                 annotated,
                 face.bounding_box.x,
                 face.bounding_box.y,
                 face.bounding_box.width,
                 face.bounding_box.height,
-                label=f"Face {active_idx} | {quality.overall_score:.0%}",
-                color=(0, 255, 120),
+                label=box_label,
+                color=box_color,
             )
         else:
             annotated = frame_bgr
 
         annotated_bytes = frame_to_jpeg_bytes(annotated)
 
-        # ── 9. Compute FPS ─────────────────────────────────────────────────────
+        # ── 10. Compute FPS ────────────────────────────────────────────────────
         t_total = (time.time() - t_start) * 1000.0
         self._frame_times.append(t_total)
         if len(self._frame_times) > 30:
@@ -289,6 +313,7 @@ class FaceAnalysisPipeline:
             behavior=behavior,
             quality=quality,
             expert_system=expert_result,
+            identity_verification=id_result,
             deep_learning=dl_result,
             fps=round(fps, 1),
             frame_width=w,
@@ -311,6 +336,15 @@ class FaceAnalysisPipeline:
             inference_time_ms=0.0,
             face_detected=False,
             face_count=0,
+            identity_verification=IdentityVerificationResult(
+                status="no_face",
+                enrolled_user_name=self._identity_verifier.enrolled_user_name,
+                match_confidence=0.0,
+                liveness_score=0.0,
+                is_live=False,
+                is_enrolled=self._identity_verifier.enrolled_embedding is not None,
+                is_paused=True,
+            ),
             fps=0.0,
             frame_width=frame_w,
             frame_height=frame_h,

@@ -248,6 +248,17 @@ class DLAnalysisResult(BaseModel):
     model_health: dict[str, Any] = Field(default_factory=dict)
 
 
+class IdentityVerificationResult(BaseModel):
+    """Real-time identity verification and liveness status."""
+    status: str = Field(default="verified")  # verified | mismatch | liveness_failed | enrolling | no_face
+    enrolled_user_name: str = Field(default="Enrolled Operator")
+    match_confidence: float = Field(default=0.993, ge=0.0, le=1.0)
+    liveness_score: float = Field(default=0.95, ge=0.0, le=1.0)
+    is_live: bool = Field(default=True)
+    is_enrolled: bool = Field(default=True)
+    is_paused: bool = Field(default=False)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Main Analysis Result — Sent over WebSocket per frame
 # ══════════════════════════════════════════════════════════════════════════════
@@ -280,6 +291,9 @@ class FaceAnalysisResult(BaseModel):
     behavior: BehaviorResult | None = None
     quality: QualityResult | None = None
     expert_system: ExpertSystemResult | None = None
+
+    # Identity Verification Layer
+    identity_verification: IdentityVerificationResult | None = None
 
     # Deep learning extensions (None if DL disabled or frame analysis failed)
     deep_learning: DLAnalysisResult | None = None

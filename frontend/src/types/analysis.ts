@@ -118,6 +118,16 @@ export interface ExpertSystemResult {
   overall_confidence: number;
 }
 
+export interface IdentityVerificationResult {
+  status: 'verified' | 'mismatch' | 'liveness_failed' | 'enrolling' | 'no_face';
+  enrolled_user_name: string;
+  match_confidence: number;
+  liveness_score: number;
+  is_live: boolean;
+  is_enrolled: boolean;
+  is_paused: boolean;
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // Main Per-Frame Result (WebSocket payload)
 // ══════════════════════════════════════════════════════════════════════════════
@@ -139,6 +149,7 @@ export interface FaceAnalysisResult {
   behavior: BehaviorResult | null;
   quality: QualityResult | null;
   expert_system: ExpertSystemResult | null;
+  identity_verification?: IdentityVerificationResult | null;
   deep_learning: DLAnalysisResult | null;
   fps: number;
   frame_width: number;

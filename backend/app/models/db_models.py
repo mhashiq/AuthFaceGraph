@@ -58,6 +58,8 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="employee")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_enrolled: Mapped[bool] = mapped_column(Boolean, default=False)
+    enrolled_face_embedding: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON 512-d vector
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

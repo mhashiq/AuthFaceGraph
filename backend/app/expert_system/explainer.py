@@ -290,8 +290,9 @@ class XAIExplainer:
             ),
         ]
 
+        attn_val = behavior.attention_state.value if hasattr(behavior.attention_state, "value") else str(behavior.attention_state)
         explanation = (
-            f"Attention state: '{behavior.attention_state.value}'. "
+            f"Attention state: '{attn_val}'. "
             f"Landmark stability: {behavior.landmark_stability:.0%} "
             f"(computed from {15} frame rolling window). "
             f"Facial symmetry: {behavior.facial_symmetry:.0%}. "

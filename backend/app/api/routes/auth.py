@@ -26,6 +26,8 @@ from app.core.logging import get_logger
 from app.core.security import (
     CurrentUser,
     LoginRequest,
+    RegisterRequest,
+    FaceEnrollmentRequest,
     LoginResponse,
     TokenPair,
     UserRole,
@@ -36,10 +38,118 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.models.db_models import User
+from app.models.db_models import User, Organization
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
+
+
+@router.post("/register", response_model=LoginResponse, summary="Register a new user account")
+async def register(
+    request: RegisterRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> LoginResponse:
+    """
+    Register a new user account, create Organization if needed, and issue JWT tokens.
+    """
+    email_clean = request.email.lower().strip()
+    if not email_clean or "@" not in email_clean:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email address.")
+
+    if len(request.password) < 6:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password must be at least 6 characters.")
+
+    # Check if user already exists
+    stmt = select(User).where(User.email == email_clean)
+    result = await db.execute(stmt)
+    existing = result.scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered. Please sign in.")
+
+    # Find or create default organization
+    org_stmt = select(Organization).limit(1)
+    org_res = await db.execute(org_stmt)
+    org = org_res.scalar_one_or_none()
+
+    if not org:
+        org = Organization(
+            id=uuid.uuid4(),
+            name=request.organization_name or "AuthBrain Enterprise",
+            slug="authbrain-org",
+        )
+        db.add(org)
+        await db.flush()
+
+    # Create new user account
+    new_user = User(
+        id=uuid.uuid4(),
+        org_id=org.id,
+        email=email_clean,
+        password_hash=hash_password(request.password),
+        full_name=request.full_name.strip() or "AuthBrain Operator",
+        role=UserRole.ADMINISTRATOR.value,
+        is_active=True,
+        is_enrolled=True,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+
+    access_token = create_access_token(
+        user_id=str(new_user.id),
+        email=new_user.email,
+        role=UserRole(new_user.role),
+        org_id=str(new_user.org_id),
+    )
+    refresh_token = create_refresh_token(
+        user_id=str(new_user.id),
+        org_id=str(new_user.org_id),
+    )
+
+    logger.info("user_registered_successfully", user_id=str(new_user.id), email=new_user.email)
+
+    return LoginResponse(
+        tokens=TokenPair(access_token=access_token, refresh_token=refresh_token),
+        user_id=str(new_user.id),
+        email=new_user.email,
+        role=UserRole(new_user.role),
+        org_id=str(new_user.org_id),
+        full_name=new_user.full_name,
+    )
+
+
+@router.post("/enroll-face", summary="Save multi-angle facial selfie embeddings for biometric identity verification")
+async def enroll_face(
+    request: FaceEnrollmentRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """
+    Save multi-angle ArcFace facial embeddings (frontal, left, right, upward) to user's profile in Supabase.
+    """
+    import json
+    target_user_id = request.user_id or current_user.user_id
+    stmt = select(User).where(User.id == uuid.UUID(target_user_id))
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+    multi_angle_data = {
+        "frontal": request.frontal_embedding,
+        "left": request.left_embedding,
+        "right": request.right_embedding,
+        "upward": request.upward_embedding,
+    }
+
+    user.enrolled_face_embedding = json.dumps(multi_angle_data)
+    user.is_enrolled = True
+    await db.commit()
+
+    logger.info("face_angles_enrolled_successfully", user_id=str(user.id), email=user.email)
+    return {"message": "Multi-angle facial selfie template registered successfully.", "is_enrolled": True}
 
 
 @router.post("/login", response_model=LoginResponse, summary="Authenticate and receive JWT tokens")

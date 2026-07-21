@@ -3,6 +3,7 @@ import { Camera, CameraOff, Rotate3d, Maximize2, Minimize2, Eye, EyeOff, Layout 
 import { useAnalysisStore } from '../../store';
 import { useFaceAnalysis } from '../../hooks/useFaceAnalysis';
 import type { Landmark } from '../../types/analysis';
+import { IdentityCard } from '../dashboard/IdentityCard';
 
 // Local replica of landmark indices for clean typescript access
 const LANDMARK_REGIONS = {
@@ -645,9 +646,34 @@ export const PrimaryAIVisualizer: React.FC = () => {
           autoPlay
         />
 
+        {/* Floating Identity Verification Card Overlay */}
+        <div className="absolute top-3 left-3 z-20 w-64 pointer-events-auto">
+          <IdentityCard />
+        </div>
+
+        {/* High Priority Identity Mismatch / Anti-Spoof Warning Overlay */}
+        {(latestResult?.identity_verification?.status === 'mismatch' || latestResult?.identity_verification?.status === 'liveness_failed') && (
+          <div className="absolute inset-0 bg-red-950/85 backdrop-blur-lg z-40 flex flex-col items-center justify-center p-6 text-center animate-fade-in pointer-events-auto">
+            <div className="w-14 h-14 rounded-2xl bg-red-500/20 border border-red-500/50 flex items-center justify-center text-red-400 mb-3 shadow-[0_0_30px_rgba(239,68,68,0.4)] animate-bounce">
+              <span className="text-2xl font-bold">⚠</span>
+            </div>
+            <div className="font-display font-black text-xl text-red-400 tracking-wider uppercase mb-1">
+              Identity Mismatch Detected
+            </div>
+            <div className="font-mono text-xs text-red-200/90 max-w-md mb-4 leading-relaxed">
+              Detected person does not match the enrolled user.
+              <br />
+              <span className="text-red-400 font-bold">Emotion & Attention Tracking Paused.</span>
+            </div>
+            <div className="px-4 py-2 rounded-xl bg-red-900/50 border border-red-500/40 text-red-300 font-mono text-[10px] shadow-lg">
+              Please return the enrolled user to the camera to continue tracking.
+            </div>
+          </div>
+        )}
+
         {/* Alert banners inside HUD */}
         {activeAlerts.length > 0 && (
-          <div className="absolute top-3 left-3 right-3 space-y-1.5 pointer-events-none">
+          <div className="absolute top-3 right-3 max-w-xs space-y-1.5 pointer-events-none z-10">
             {activeAlerts.slice(0, 2).map((alert, i) => (
               <div key={i} className="bg-risk-critical/25 border border-risk-critical/40 backdrop-blur-md rounded-lg px-3 py-2 animate-slide-in-right">
                 <span className="text-risk-critical text-[11px] font-mono font-semibold flex items-center gap-1.5">
